@@ -2,21 +2,26 @@ package sled
 
 import (
 	"encoding/json"
+	"sync"
+
 	"github.com/Workiva/go-datastructures/trie/ctrie"
 	"github.com/boltdb/bolt"
-	"sync"
 )
 
 type Sled struct {
-	ct       *ctrie.Ctrie
-	db       *bolt.DB
-	close_wg *sync.WaitGroup
-	loading  chan struct{}
+	ct         *ctrie.Ctrie
+	db         *bolt.DB
+	close_wg   *sync.WaitGroup
+	loading    chan struct{}
+	events_wg  *sync.WaitGroup
+	event_chan chan *Event
 }
 
 func New() *Sled {
 	ct := ctrie.New(nil)
-	s := Sled{ct, nil, nil, nil}
+	wg := sync.WaitGroup{}
+
+	s := Sled{ct, nil, nil, nil, &wg, nil}
 	return &s
 }
 
@@ -29,12 +34,23 @@ func Open(path string) (*Sled, error) {
 }
 
 func (s *Sled) Close() error {
-	s.close_wg.Wait()
+	s.Wait()
 	return s.db.Close()
+}
+
+func (s *Sled) Wait() {
+	if s.close_wg != nil {
+		s.close_wg.Wait()
+	}
+	if s.event_chan != nil {
+		close(s.event_chan)
+	}
+	s.events_wg.Wait()
 }
 
 func (s *Sled) Set(key string, value interface{}) {
 	s.ct.Insert([]byte(key), value)
+	s.send_event(CreateEvent, key)
 	if s.db != nil {
 		s.close_wg.Add(1)
 		go func() {
