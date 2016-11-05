@@ -9,19 +9,18 @@ import (
 )
 
 type Sled struct {
-	ct         *ctrie.Ctrie
-	db         *bolt.DB
-	close_wg   *sync.WaitGroup
-	loading    chan struct{}
-	events_wg  *sync.WaitGroup
-	event_chan chan *Event
+	ct       *ctrie.Ctrie
+	db       *bolt.DB
+	close_wg *sync.WaitGroup
+	loading  chan struct{}
+	events   *EventController
 }
 
 func New() *Sled {
 	ct := ctrie.New(nil)
 	wg := sync.WaitGroup{}
-
-	s := Sled{ct, nil, nil, nil, &wg, nil}
+	ec := NewEventController()
+	s := Sled{ct, nil, &wg, nil, ec}
 	return &s
 }
 
@@ -42,15 +41,12 @@ func (s *Sled) Wait() {
 	if s.close_wg != nil {
 		s.close_wg.Wait()
 	}
-	if s.event_chan != nil {
-		close(s.event_chan)
-	}
-	s.events_wg.Wait()
+	s.events.Wait()
 }
 
 func (s *Sled) Set(key string, value interface{}) {
 	s.ct.Insert([]byte(key), value)
-	s.send_event(CreateEvent, key)
+	s.SendEvent(CreateEvent, key)
 	if s.db != nil {
 		s.close_wg.Add(1)
 		go func() {
