@@ -27,10 +27,12 @@ type Event struct {
 }
 
 type EventController struct {
-	wg                    sync.WaitGroup
-	indexLock             sync.Mutex
-	createEventSignalLock sync.Mutex
-	createEventSignaler   *sync.Cond
+	// wg        sync.WaitGroup
+	indexLock sync.Mutex
+	eventwait sync.WaitGroup
+	lockers   []*sync.Mutex
+	signalers []*sync.Cond
+	// createEventSignaler   *sync.Cond
 	// event_channels []chan *Event
 	// event_chan chan *Event
 	// events		[][]chan *Event
@@ -38,13 +40,24 @@ type EventController struct {
 
 type EventHandler func(event *Event)
 
+// sync.Cond needs a Locker interface, but we don't *grin*
+type nilLocker struct{}
+
+func (nl *nilLocker) Lock() {
+}
+
+func (nl *nilLocker) Unlock() {
+}
+
 func NewEventController() *EventController {
-	// Create channels for every event type
-	// channels := make([]chan *Event, 1)
-	// channels[0] = make(chan *Event)
-	// return &EventController{event_channels: channels}
 	ec := &EventController{}
-	ec.createEventSignaler = sync.NewCond(&ec.createEventSignalLock)
+	lockers := make([]*sync.Mutex, 1)
+	signalers := make([]*sync.Cond, 1)
+	lockers[CreateEvent] = &sync.Mutex{}
+	// signalers[CreateEvent] = sync.NewCond(lockers[CreateEvent])
+	signalers[CreateEvent] = sync.NewCond(&nilLocker{})
+	ec.lockers = lockers
+	ec.signalers = signalers
 	return ec
 }
 
@@ -60,92 +73,100 @@ func (e *EventController) Unlock() {
 	e.indexLock.Unlock()
 }
 
-func (e *EventController) LockCreateEventSignaler() {
-	e.createEventSignalLock.Lock()
+func (e *EventController) LockEvents(t EventType) {
+	e.lockers[t].Lock()
 }
 
-func (e *EventController) UnlockCreateEventSignaler() {
-	e.createEventSignalLock.Unlock()
+func (e *EventController) UnlockEvents(t EventType) {
+	e.lockers[t].Unlock()
 }
 
-func (e *EventController) WaitCreateEventSignaler() {
-	e.createEventSignaler.Wait()
-}
-
-func (e *EventController) HandleEvents() {
-	// start event handler thread if not started
-	// this is the only event channel reader, signal
-	// on the channel is written to all the registered handlers
-
+func (e *EventController) WaitSignaler(t EventType) {
+	e.signalers[t].Wait()
 }
 
 func (e *EventController) Wait() {
-	e.wg.Wait()
+	e.eventwait.Wait()
 }
 
-func (s *Sled) On(t EventType, handler EventHandler) {
+func (e *EventController) WGadd(delta int) {
+	e.eventwait.Add(delta)
+}
 
+func (e *EventController) WGdone() {
+	e.eventwait.Done()
+}
+
+func (s *Sled) EventReady(key string) (bool, *Event) {
+	switch v := s.Get(key); v.(type) {
+	case nil:
+		return false, nil
+	case *Event:
+		return true, v.(*Event)
+	default:
+		return false, nil
+	}
+	return false, nil
+}
+
+func (s *Sled) On(t EventType, name string, handler EventHandler) {
+	ready := make(chan struct{})
 	go func() {
 		for {
-			event_key := "/events/" + string(t) + "/latest"
-			var event *Event
-			valid := false
-			s.events.LockCreateEventSignaler()
-			for !valid {
-				s.events.WaitCreateEventSignaler()
-				switch v := s.Get(event_key); v.(type) {
-				case nil:
-				case *Event:
-					event = v.(*Event)
-					valid = true
-				}
+			// var event *Event
+			// s.events.LockEvents(t)
+			if ready != nil {
+				close(ready)
+				ready = nil
 			}
-			fmt.Println(event)
+			// s.events.WGadd(1)
+			fmt.Println("Waiting", name)
+			s.events.WaitSignaler(t)
+			event := s.Get("/events/" + string(t) + "/latest").(*Event)
+			// s.events.UnlockEvents(t)
+			fmt.Println("Running", name)
 			handler(event)
-			s.events.UnlockCreateEventSignaler()
+			fmt.Println("Finished", name)
+
+			// s.events.WGdone()
+
+			// for valid, ev := s.EventReady(event_key); !valid; {
+			// 	if ready != nil {
+			// 		close(ready)
+			// 		ready = nil
+			// 	}
+			// 	fmt.Println("Waiting", name)
+			// 	s.events.WaitSignaler(t)
+			// 	event = ev
+			// }
+
 		}
 	}()
-
-	// e := s.events
-	// index_key := "/events/" + string(t) + "/index"
-	// handler_index := int(0)
-	// e.Lock()
-	// switch v := s.Get(index_key); v.(type) {
-	// case nil:
-	// 	s.Set(index_key, 0)
-	// case int:
-	// 	handler_index = v.(int)
-	// }
-	// handler_index++
-	// s.Set(index_key, handler_index)
-	// e.Unlock()
-	// handler_key := "/events/" + string(t) + "/handlers/" + strconv.Itoa(handler_index)
-	// s.Set(handler_key, handler)
-	// e.HandleEvents()
-
-	// s.event_chan = make(chan *Event)
-	// s.events_wg.Add(1)
-	// go func() {
-	// 	for e := range s.event_chan {
-	// 		if e.Type == t {
-	// 			handler(e)
-	// 		}
-	// 	}
-	// 	s.events_wg.Done()
-	// }()
+	// don't return until the event listener is ready
+	select {
+	case <-ready:
+	}
 }
 
-func (e *EventController) Send() {
-	e.createEventSignaler.Broadcast()
+func (e *EventController) Trigger(t EventType) {
+	e.signalers[t].Broadcast()
+}
+
+var count int
+
+func init() {
+	count = 0
 }
 
 func (s *Sled) SendEvent(t EventType, key string) {
+	count++
+	fmt.Println("SendEvent", count)
 	now := time.Now()
 	e := Event{t, key, &now}
 	event_key := "/events/" + string(t) + "/latest"
-	// s.events.LockCreateEventSignaler()
+	// Insert without an event, so can't use s.Set()
+	// s.events.LockEvents(t)
 	s.ct.Insert([]byte(event_key), &e)
-	// s.events.UnlockCreateEventSignaler()
-	s.events.Send()
-	// s.events.event_channels[t] <- &ev
+	// s.events.UnlockEvents(t)
+	s.events.Trigger(t)
 }
