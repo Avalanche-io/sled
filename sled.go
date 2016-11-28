@@ -37,6 +37,11 @@ var (
 	EventTypeCount  int
 )
 
+type Element interface {
+	Key() string
+	Value() interface{}
+}
+
 func New() *Sled {
 	ct := ctrie.New(nil)
 	event_keys(ct)
@@ -50,6 +55,9 @@ func New() *Sled {
 func Open(path string) (*Sled, error) {
 	s := New()
 	err := s.Open(path)
+	if err != nil {
+		return nil, err
+	}
 	s.createBuckets()
 	s.loadAllKeys()
 	return s, err
@@ -254,4 +262,38 @@ func (s *Sled) Get(key string) interface{} {
 	}
 	return nil
 
+}
+
+type ele struct {
+	k string
+	v interface{}
+}
+
+func (e *ele) Key() string {
+	return e.k
+}
+
+func (e *ele) Value() interface{} {
+	return e.v
+}
+
+func (s *Sled) Iterator(cancel <-chan struct{}) <-chan Element {
+	out := make(chan Element)
+	c := make(chan struct{})
+	go func() {
+		defer close(out)
+		for e := range s.ct.Iterator(c) {
+			entry := ele{
+				string(e.Key),
+				e.Value,
+			}
+			select {
+			case out <- &entry:
+			case <-cancel:
+				close(c)
+			}
+		}
+
+	}()
+	return out
 }

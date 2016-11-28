@@ -18,7 +18,7 @@ func TestSubscribeToEvent(t *testing.T) {
 	is := is.New(t)
 	sl := sled.New()
 
-	sub := sl.Subscribe(events.StringToType("set-key"))
+	sub := sl.Subscribe(events.StringToType("key-set"))
 	go func() {
 		time.Sleep(1 * time.Second)
 		for i := 0; i < 1000; i++ {
@@ -36,7 +36,7 @@ func TestSubscribeToEvent(t *testing.T) {
 	}()
 
 	for e := range sub.Events() {
-		is.Equal(e.Type, events.StringToType("set-key"))
+		is.Equal(e.Type, events.StringToType("key-set"))
 		count++
 		if count == 1000 {
 			close(done)
@@ -75,7 +75,7 @@ func TestSubscribeToSpacificEvents(t *testing.T) {
 			Count:  1,
 		},
 		{
-			Type:   events.StringToType("set-key"),
+			Type:   events.StringToType("key-set"),
 			Key:    "/foo",
 			Values: []string{"bar", "bat"},
 			Count:  2,
@@ -113,7 +113,7 @@ func TestMultithreadEvents(t *testing.T) {
 	threads := 8
 	keys := 100000 / threads
 
-	sub := sl.Subscribe(events.StringToType("set-key"))
+	sub := sl.Subscribe(events.StringToType("key-set"))
 	var wg sync.WaitGroup
 	done := make(chan struct{})
 	set_start := make([]time.Time, threads)
@@ -147,7 +147,7 @@ func TestMultithreadEvents(t *testing.T) {
 	re := regexp.MustCompile(`^/foo/thread_([0-9]+)/([0-9]+)$`)
 	counts := make([]int, threads)
 	for e := range sub.Events() {
-		is.Equal(e.Type, events.StringToType("set-key"))
+		is.Equal(e.Type, events.StringToType("key-set"))
 		path_strings := re.FindStringSubmatch(e.Key)
 		thread, err := strconv.Atoi(path_strings[1])
 		is.NoErr(err)
