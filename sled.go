@@ -21,6 +21,17 @@ type Sled struct {
 	event_logs        [][]*events.Event
 }
 
+type KV interface {
+	Set(string, interface{})
+	Get(key string) interface{}
+	Iterator(<-chan struct{}) <-chan Element
+}
+
+type Element interface {
+	Key() string
+	Value() interface{}
+}
+
 // A Sledder is a data structure that can can represent itself as key value
 // pairs for storage in a Sled structure.
 type Sledder interface {
@@ -36,11 +47,6 @@ var (
 	SetKeyEvent     events.Type
 	EventTypeCount  int
 )
-
-type Element interface {
-	Key() string
-	Value() interface{}
-}
 
 func New() *Sled {
 	ct := ctrie.New(nil)
@@ -190,10 +196,10 @@ func (s *Sled) LogEvent(t events.Type, key string, value interface{}) {
 		s.event_index_lock[t].Lock()
 		id := len(s.event_logs[t])
 		// id := s.event_id(t)
-		e := events.Event{id, t, key, value, &now}
+		e := events.New(id, t, key, value, now) // Event{id, t, key, value, &now}
 		// event_key := fmt.Sprintf(".events/%s/%d", t, id)
 		// s.ct.Insert([]byte(event_key), &e)
-		s.event_logs[t] = append(s.event_logs[t], &e)
+		s.event_logs[t] = append(s.event_logs[t], e)
 		s.event_index_lock[t].Unlock()
 	}()
 }
@@ -250,6 +256,16 @@ func (s *Sled) Set(key string, value interface{}) {
 			}
 		}()
 	}
+}
+
+func (s *Sled) Snapshot(key string) *Sled {
+	ct := s.ct.Snapshot()
+	event_keys(ct)
+	locker := make([]sync.Mutex, EventTypeCount)
+	event_logs := make([][]*events.Event, EventTypeCount)
+	// sl := Sled{ct, s.db, s.close_wg, s.loading, locker, 0, event_logs}
+	sl := Sled{ct, nil, s.close_wg, nil, locker, 0, event_logs}
+	return &sl
 }
 
 func (s *Sled) Get(key string) interface{} {

@@ -20,6 +20,17 @@ type Event struct {
 	Time  *time.Time
 }
 
+func New(id int, t Type, key string, value interface{}, event_time time.Time) *Event {
+	e := Event{
+		Id:    id,
+		Type:  t,
+		Key:   key,
+		Value: value,
+		Time:  &event_time,
+	}
+	return &e
+}
+
 type Subscription interface {
 	Events() <-chan *Event
 	Close() error
