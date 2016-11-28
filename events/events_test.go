@@ -81,29 +81,56 @@ func TestSubscribeToSpacificEvents(t *testing.T) {
 			Count:  2,
 		},
 	}
+	var start_wg sync.WaitGroup
+	var event_listeners_wg sync.WaitGroup
 	subscriptions := make([]events.Subscription, 0, len(tests))
+	start_wg.Add(len(tests))
+	event_listeners_wg.Add(len(tests))
+	event_type_counts := make(map[events.Type]int)
 	for _, t := range tests {
-		sub := sl.Subscribe(t.Type, t.Key)
+		event_type_counts[t.Type] = t.Count
+	}
+	var event_type_mutex sync.Mutex
+	for _, x := range tests {
+		sub := sl.Subscribe(x.Type, x.Key)
 		subscriptions = append(subscriptions, sub)
 		go func(expected_values []string, expected_count int) {
-			count := 0
+			defer event_listeners_wg.Done()
+			start_wg.Done()
 			for e := range sub.Events() {
-				is.Equal(e.Value, expected_values[count])
-				count++
+				t.Log("event:", e)
+				event_type_mutex.Lock()
+				event_type_counts[e.Type] = event_type_counts[e.Type] - 1
+				event_type_mutex.Unlock()
+
+				// is.Equal(e.Value, expected_values[count])
 			}
-			is.Equal(count, expected_count)
-		}(t.Values, t.Count)
+			t.Log("sub.Events() - done")
+		}(x.Values, x.Count)
 	}
+	start_wg.Wait()
 	sl.Set("/foo", "bar")
 	sl.Set("/foo", "bat")
 	sl.Delete("/foo")
 
-	time.AfterFunc(2*time.Millisecond, func() {
+	time.AfterFunc(4*time.Millisecond, func() {
 		for _, s := range subscriptions {
 			err := s.Close()
 			is.NoErr(err)
 		}
 	})
+	time.Sleep(10 * time.Millisecond)
+	event_type_mutex.Lock()
+	for i, v := range event_type_counts {
+		if v != 0 {
+			t.Log("Test", i, "failed:", tests)
+			t.Log("Event: ", tests[i].Type.String())
+			t.Log("event_type_counts:", event_type_counts)
+		}
+		is.Equal(v, 0)
+	}
+	event_type_mutex.Unlock()
+	event_listeners_wg.Wait()
 }
 
 func TestMultithreadEvents(t *testing.T) {

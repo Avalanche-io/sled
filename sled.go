@@ -84,7 +84,7 @@ func init() {
 	KeyCreatedEvent = events.AddType("key-created")
 	KeyChangedEvent = events.AddType("key-changed")
 	KeyRemovedEvent = events.AddType("key-removed")
-	SetKeyEvent = events.AddType("set-key")
+	SetKeyEvent = events.AddType("key-set")
 	EventTypeCount = 4
 }
 
@@ -232,16 +232,17 @@ func (s *Sled) Set(key string, value interface{}) {
 	existed := false
 	if s.event_subscribers > 0 {
 		old_value, existed = s.ct.Lookup([]byte(key))
-	}
-	s.ct.Insert([]byte(key), value)
-	if s.event_subscribers > 0 {
+		s.ct.Insert([]byte(key), value)
 		if !existed {
 			s.LogEvent(events.StringToType("key-created"), key, value)
 		} else {
 			s.LogEvent(events.StringToType("key-changed"), key, old_value)
 		}
-		s.LogEvent(events.StringToType("set-key"), key, value)
+		s.LogEvent(events.StringToType("key-set"), key, value)
+	} else {
+		s.ct.Insert([]byte(key), value)
 	}
+
 	if s.db != nil {
 		s.close_wg.Add(1)
 		go func() {

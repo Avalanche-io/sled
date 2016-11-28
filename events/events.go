@@ -1,16 +1,18 @@
 package events
 
 import (
-	"strconv"
 	"sync"
 	"time"
 )
 
-type Type int
+var (
+	initialized bool
+	type_index  Type
+	to_type     map[string]Type
+	from_type   []string
+)
 
-func (t Type) String() string {
-	return strconv.Itoa(int(t))
-}
+type Type int
 
 type Event struct {
 	Id    int
@@ -40,24 +42,29 @@ type Fetcher interface {
 	Fetch() (events []*Event, err error)
 }
 
-var initialized bool
-var type_index Type
-var type_map map[string]Type
+func (t Type) String() string {
+	return TypeToString(t)
+}
 
 func AddType(key string) Type {
 	if !initialized {
 		type_index = 0
-		type_map = make(map[string]Type)
+		to_type = make(map[string]Type)
 		initialized = true
 	}
-	type_map[key] = type_index
+	from_type = append(from_type, key)
+	to_type[key] = type_index
 	i := type_index
-	type_index = type_index + 1
+	type_index++
 	return i
 }
 
 func StringToType(key string) Type {
-	return type_map[key]
+	return to_type[key]
+}
+
+func TypeToString(t Type) string {
+	return from_type[int(t)]
 }
 
 type sub struct {
