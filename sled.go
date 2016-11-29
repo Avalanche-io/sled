@@ -227,6 +227,28 @@ func (s *Sled) Delete(key string) {
 	}
 }
 
+func (s *Sled) SetNil(key string, value interface{}) {
+	_, existed := s.ct.Lookup([]byte(key))
+	if existed {
+		return
+	}
+	s.ct.Insert([]byte(key), value)
+	if s.event_subscribers > 0 {
+		s.LogEvent(events.StringToType("key-created"), key, value)
+		s.LogEvent(events.StringToType("key-set"), key, value)
+	}
+	if s.db != nil {
+		value_json, err := json.Marshal(value)
+		if err != nil {
+			panic(err)
+		}
+		err = s.put_db(s.db, "assets", []byte(key), []byte(value_json))
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 func (s *Sled) Set(key string, value interface{}) {
 	var old_value interface{}
 	existed := false
@@ -244,18 +266,18 @@ func (s *Sled) Set(key string, value interface{}) {
 	}
 
 	if s.db != nil {
-		s.close_wg.Add(1)
-		go func() {
-			defer s.close_wg.Done()
-			value_json, err := json.Marshal(value)
-			if err != nil {
-				panic(err)
-			}
-			err = s.put_db(s.db, "assets", []byte(key), []byte(value_json))
-			if err != nil {
-				panic(err)
-			}
-		}()
+		// s.close_wg.Add(1)
+		// go func() {
+		// defer s.close_wg.Done()
+		value_json, err := json.Marshal(value)
+		if err != nil {
+			panic(err)
+		}
+		err = s.put_db(s.db, "assets", []byte(key), []byte(value_json))
+		if err != nil {
+			panic(err)
+		}
+		// }()
 	}
 }
 

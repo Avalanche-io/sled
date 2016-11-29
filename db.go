@@ -3,9 +3,10 @@ package sled
 import (
 	"encoding/json"
 	"errors"
-	"github.com/boltdb/bolt"
 	"log"
 	"sync"
+
+	"github.com/boltdb/bolt"
 )
 
 var bucket_names []string
@@ -116,7 +117,7 @@ func (s *Sled) createBuckets() error {
 
 // put sets the value of a key for a given bucket
 func (s *Sled) put_db(db *bolt.DB, bucket string, key []byte, data []byte) error {
-	return db.Update(func(tx *bolt.Tx) error {
+	return db.Batch(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		return b.Put(key, data)
 	})
