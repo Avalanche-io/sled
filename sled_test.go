@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/cheekybits/is"
 
@@ -89,6 +90,7 @@ func TestPersistance(t *testing.T) {
 
 	sl2, err := sled.Open(db_path)
 	is.NoErr(err)
+	time.Sleep(time.Millisecond)
 	value := sl2.Get("foo")
 	is.NotNil(value)
 	is.Equal(value.(string), "bar")

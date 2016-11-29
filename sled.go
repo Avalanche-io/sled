@@ -227,6 +227,8 @@ func (s *Sled) Delete(key string) {
 	}
 }
 
+// SetNil is exclusive Set.  It only assigns the value to key,
+// if the key is not set already.
 func (s *Sled) SetNil(key string, value interface{}) {
 	_, existed := s.ct.Lookup([]byte(key))
 	if existed {
@@ -249,6 +251,7 @@ func (s *Sled) SetNil(key string, value interface{}) {
 	}
 }
 
+// Set stores value in key.
 func (s *Sled) Set(key string, value interface{}) {
 	var old_value interface{}
 	existed := false
@@ -281,6 +284,8 @@ func (s *Sled) Set(key string, value interface{}) {
 	}
 }
 
+// Snapshot returns a single point in time image of the Sled.
+// Snapshot is fast and non blocking.
 func (s *Sled) Snapshot(key string) *Sled {
 	ct := s.ct.Snapshot()
 	event_keys(ct)
@@ -292,9 +297,9 @@ func (s *Sled) Snapshot(key string) *Sled {
 }
 
 func (s *Sled) Get(key string) interface{} {
-	if s.loading != nil {
-		<-s.loading
-	}
+	// if s.loading != nil {
+	// 	<-s.loading
+	// }
 	val, ok := s.ct.Lookup([]byte(key))
 	if ok {
 		return val
