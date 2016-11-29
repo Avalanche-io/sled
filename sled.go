@@ -25,6 +25,9 @@ type KV interface {
 	Set(string, interface{})
 	Get(key string) interface{}
 	Iterator(<-chan struct{}) <-chan Element
+	Snapshot() *Sled
+	SetNil(string, interface{}) bool
+	Delete(int) (interface{}, bool)
 }
 
 type Element interface {
@@ -44,7 +47,7 @@ var (
 	KeyCreatedEvent events.Type
 	KeyChangedEvent events.Type
 	KeyRemovedEvent events.Type
-	SetKeyEvent     events.Type
+	KeySetEvent     events.Type
 	EventTypeCount  int
 )
 
@@ -84,7 +87,7 @@ func init() {
 	KeyCreatedEvent = events.AddType("key-created")
 	KeyChangedEvent = events.AddType("key-changed")
 	KeyRemovedEvent = events.AddType("key-removed")
-	SetKeyEvent = events.AddType("key-set")
+	KeySetEvent = events.AddType("key-set")
 	EventTypeCount = 4
 }
 
@@ -92,7 +95,7 @@ func event_keys(s *ctrie.Ctrie) {
 	// s.Insert([]byte(".events/"+string(KeyCreatedEvent)+"/next_id"), 0)
 	// s.Insert([]byte(".events/"+string(KeyChangedEvent)+"/next_id"), 0)
 	// s.Insert([]byte(".events/"+string(KeyRemovedEvent)+"/next_id"), 0)
-	// s.Insert([]byte(".events/"+string(SetKeyEvent)+"/next_id"), 0)
+	// s.Insert([]byte(".events/"+string(KeySetEvent)+"/next_id"), 0)
 
 }
 
@@ -218,26 +221,30 @@ func (s *Sled) Subscribe(t events.Type, args ...string) events.Subscription {
 	return sub
 }
 
-func (s *Sled) Delete(key string) {
-	v, existed := s.ct.Remove([]byte(key))
+// Delete removes a key and value, and returns it's previous value with
+// an existed flat that will be true if the key was not empty.
+func (s *Sled) Delete(key string) (value interface{}, existed bool) {
+	value, existed = s.ct.Remove([]byte(key))
 	if s.event_subscribers > 0 {
 		if existed {
-			s.LogEvent(events.StringToType("key-removed"), key, v)
+			s.LogEvent(KeyRemovedEvent, key, value)
 		}
 	}
+	return
 }
 
 // SetNil is exclusive Set.  It only assigns the value to key,
-// if the key is not set already.
-func (s *Sled) SetNil(key string, value interface{}) {
+// if the key is not set already.  It returns true if the key was
+// empty, and false otherwise.
+func (s *Sled) SetNil(key string, value interface{}) bool {
 	_, existed := s.ct.Lookup([]byte(key))
 	if existed {
-		return
+		return true
 	}
 	s.ct.Insert([]byte(key), value)
 	if s.event_subscribers > 0 {
-		s.LogEvent(events.StringToType("key-created"), key, value)
-		s.LogEvent(events.StringToType("key-set"), key, value)
+		s.LogEvent(KeyCreatedEvent, key, value)
+		s.LogEvent(KeySetEvent, key, value)
 	}
 	if s.db != nil {
 		value_json, err := json.Marshal(value)
@@ -249,6 +256,7 @@ func (s *Sled) SetNil(key string, value interface{}) {
 			panic(err)
 		}
 	}
+	return false
 }
 
 // Set stores value in key.
@@ -259,19 +267,16 @@ func (s *Sled) Set(key string, value interface{}) {
 		old_value, existed = s.ct.Lookup([]byte(key))
 		s.ct.Insert([]byte(key), value)
 		if !existed {
-			s.LogEvent(events.StringToType("key-created"), key, value)
+			s.LogEvent(KeyCreatedEvent, key, value)
 		} else {
-			s.LogEvent(events.StringToType("key-changed"), key, old_value)
+			s.LogEvent(KeyChangedEvent, key, old_value)
 		}
-		s.LogEvent(events.StringToType("key-set"), key, value)
+		s.LogEvent(KeySetEvent, key, value)
 	} else {
 		s.ct.Insert([]byte(key), value)
 	}
 
 	if s.db != nil {
-		// s.close_wg.Add(1)
-		// go func() {
-		// defer s.close_wg.Done()
 		value_json, err := json.Marshal(value)
 		if err != nil {
 			panic(err)
@@ -280,32 +285,27 @@ func (s *Sled) Set(key string, value interface{}) {
 		if err != nil {
 			panic(err)
 		}
-		// }()
 	}
 }
 
 // Snapshot returns a single point in time image of the Sled.
 // Snapshot is fast and non blocking.
-func (s *Sled) Snapshot(key string) *Sled {
+func (s *Sled) Snapshot() *Sled {
 	ct := s.ct.Snapshot()
 	event_keys(ct)
 	locker := make([]sync.Mutex, EventTypeCount)
 	event_logs := make([][]*events.Event, EventTypeCount)
-	// sl := Sled{ct, s.db, s.close_wg, s.loading, locker, 0, event_logs}
 	sl := Sled{ct, nil, s.close_wg, nil, locker, 0, event_logs}
 	return &sl
 }
 
+// Get return the value stored for the given key, or nil if no value was found.
 func (s *Sled) Get(key string) interface{} {
-	// if s.loading != nil {
-	// 	<-s.loading
-	// }
 	val, ok := s.ct.Lookup([]byte(key))
 	if ok {
 		return val
 	}
 	return nil
-
 }
 
 type ele struct {
