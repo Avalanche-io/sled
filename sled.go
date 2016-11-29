@@ -27,7 +27,7 @@ type KV interface {
 	Iterator(<-chan struct{}) <-chan Element
 	Snapshot() *Sled
 	SetNil(string, interface{}) bool
-	Delete(int) (interface{}, bool)
+	Delete(string) (interface{}, bool)
 }
 
 type Element interface {
