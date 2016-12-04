@@ -235,11 +235,11 @@ func (s *Sled) Delete(key string) (value interface{}, existed bool) {
 
 // SetNil is exclusive Set.  It only assigns the value to key,
 // if the key is not set already.  It returns true if the key was
-// empty, and false otherwise.
+// empty and the value assigned, otherwise false.
 func (s *Sled) SetNil(key string, value interface{}) bool {
 	_, existed := s.ct.Lookup([]byte(key))
 	if existed {
-		return true
+		return false
 	}
 	s.ct.Insert([]byte(key), value)
 	if s.event_subscribers > 0 {
@@ -256,7 +256,7 @@ func (s *Sled) SetNil(key string, value interface{}) bool {
 			panic(err)
 		}
 	}
-	return false
+	return true
 }
 
 // Set stores value in key.
