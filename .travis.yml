@@ -10,7 +10,9 @@ before_install:
   - go get github.com/mattn/goveralls
 script:
   - go test -coverprofile=sled.coverprofile .
+  - go test -coverprofile=config.coverprofile ./config
   - go test -coverprofile=events.coverprofile ./events
+  - go test -coverprofile=storage.coverprofile ./storage
   - $HOME/gopath/bin/gover
   - $HOME/gopath/bin/goveralls -coverprofile=gover.coverprofile -service travis-ci
 
