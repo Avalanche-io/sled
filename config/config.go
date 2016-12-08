@@ -57,7 +57,7 @@ func (c *Config) FilePath(name *Filename) string {
 }
 
 func (c *Config) WithRoot(path string) *Config {
-	c.Root, _ = NewPath(path)
+	c.Root, _ = NewPath(path + "/")
 	return c
 }
 

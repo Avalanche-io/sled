@@ -1,12 +1,12 @@
 package sled
 
 import (
-	"encoding/json"
 	"errors"
-	"log"
+	"fmt"
 	"sync"
 
 	"github.com/boltdb/bolt"
+	"github.com/etcenter/c4/asset"
 )
 
 var bucket_names []string
@@ -21,15 +21,46 @@ func (e createBucketError) Error() string {
 	return "Error creating bucket: " + string(e)
 }
 
-func (s *Sled) Open(path string) error {
-	db, err := bolt.Open(path, 0777, nil)
+// Open the sled database at the provided path, or create a new one.
+func (s *Sled) Open(filepath string) error {
+	if s.db != nil {
+		return dbOpenError
+	}
+	if filepath == "/tmp/sled.db" {
+		panic("tried to open /tmp/sled.db")
+	}
+
+	// fmt.Printf("Open %s\n", filepath)
+	db, err := bolt.Open(filepath, 0777, nil)
 	if err != nil {
-		return err
+		return SledError(err.Error())
 	}
 	s.db = db
 	wg := sync.WaitGroup{}
 	s.close_wg = &wg
+
+	if err != nil {
+		return SledError(err.Error())
+	}
+
+	s.createBuckets()
+	s.loadAllKeys()
 	return nil
+}
+
+// Wait for database operations to complete, and close database.
+func (s *Sled) Close() error {
+	s.Wait()
+	err := s.db.Close()
+	s.db = nil
+	return err
+}
+
+// Wait for database operations to complete.
+func (s *Sled) Wait() {
+	if s.close_wg != nil {
+		s.close_wg.Wait()
+	}
 }
 
 func (s *Sled) loadAllKeys() {
@@ -38,23 +69,23 @@ func (s *Sled) loadAllKeys() {
 	go func() {
 		defer s.close_wg.Done()
 		for ele := range s.db_iterator("assets", nil, nil) {
-			s.ct.Insert(ele.Key(), ele.Value())
+			s.ct.Insert(ele.Key(), ele.Id())
 		}
 		close(s.loading)
 	}()
 }
 
 type element struct {
-	key   []byte
-	value interface{}
+	key []byte
+	id  *asset.ID
 }
 
 func (k *element) Key() []byte {
 	return k.key
 }
 
-func (k *element) Value() interface{} {
-	return k.value
+func (k *element) Id() *asset.ID {
+	return k.id
 }
 
 func (s *Sled) db_iterator(bucket string, key []byte, cancel <-chan struct{}) <-chan element {
@@ -78,13 +109,11 @@ func (s *Sled) db_iterator(bucket string, key []byte, cancel <-chan struct{}) <-
 				if v == nil || len(v) == 0 {
 					ent = element{k, nil}
 				} else {
-					var val interface{}
-					err := json.Unmarshal(v, &val)
-					if err != nil {
-						log.Fatalf("db.Iterator error: k: %v, \tv: %v\n", k, v)
-						return err
+					if len(v) != 64 {
+						return errors.New(fmt.Sprintf("sled.DB error: Wrong length for stored value: %d", len(v)))
 					}
-					ent = element{k, val}
+					id := asset.BytesToID(v)
+					ent = element{k, id}
 				}
 				select {
 				case out <- ent:
@@ -116,20 +145,24 @@ func (s *Sled) createBuckets() error {
 }
 
 // put sets the value of a key for a given bucket
-func (s *Sled) put_db(db *bolt.DB, bucket string, key []byte, data []byte) error {
-	return db.Batch(func(tx *bolt.Tx) error {
+func (s *Sled) put_db(bucket string, key string, id *asset.ID) error {
+	return s.db.Batch(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
-		return b.Put(key, data)
+		return b.Put([]byte(key), id.RawBytes())
 	})
 }
 
-// get retrieves the value a key for the given bucket
-func (s *Sled) load_db(db *bolt.DB, bucket string, key []byte) ([]byte, error) {
+// get retrieves the value for a key for a given bucket
+func (s *Sled) get_db(bucket string, key string) (id *asset.ID, err error) {
 	var data []byte
-	err := db.View(func(tx *bolt.Tx) error {
+	err = s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
-		data = b.Get(key)
+		data = b.Get([]byte(key))
+		if len(data) != 64 {
+			return errors.New("Value stored in database is not a C4 ID.")
+		}
+		id = asset.BytesToID(data)
 		return nil
 	})
-	return data, err
+	return
 }

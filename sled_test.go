@@ -7,141 +7,149 @@ import (
 	"os"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/cheekybits/is"
 
 	"github.com/Avalanche-io/sled"
+	"github.com/Avalanche-io/sled/config"
 )
 
-func TestCreateItem(t *testing.T) {
+func TestConfiguration(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
 
-	sl := sled.New()
+	t.Log("do")
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestConfiguration_")
+	is.NoErr(err)
+	cfg := config.New().WithRoot(dir).WithDB("db.sled")
+	sl := sled.New(cfg)
 
+	t.Log("check")
+	is.NotNil(cfg)
 	is.NotNil(sl)
+
+	if _, err := os.Stat(dir + "/db.sled"); os.IsNotExist(err) {
+		is.Fail("Db file not created")
+	}
 }
 
-func TestGetSetKey(t *testing.T) {
+func TestReadWrite(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestReadWrite_")
+	is.NoErr(err)
+	// defer os.RemoveAll(dir)
+	cfg := config.New().WithRoot(dir).WithDB("sled.db")
 
-	sl := sled.New()
-
+	t.Log("do")
+	sl := sled.New(cfg)
 	sl.Set("foo", "bar")
-	value := sl.Get("foo")
+	value, err := sl.Get("foo")
+
+	t.Log("check")
+	is.NoErr(err)
 	is.Equal(value.(string), "bar")
 }
 
-func TestCreatesDB(t *testing.T) {
+func TestCreatesDBfile(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_")
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestCreatesDBfile_")
 	is.NoErr(err)
+	// defer os.RemoveAll(dir)
+	cfg := config.New().WithRoot(dir).WithDB("sled.db")
 
-	defer os.RemoveAll(dir)
-
-	db_path := dir + "/sled.db"
-	sl, err := sled.Open(db_path)
-	is.NoErr(err)
-	sl.Close()
-	if _, err = os.Stat(db_path); os.IsNotExist(err) {
-		is.Fail("DB not created " + db_path)
-	}
-}
-
-func TestLateOpen(t *testing.T) {
-	is := is.New(t)
-	ch := temp_dir(is)
-	db_path := <-ch
-	defer close(ch)
-
-	sl := sled.New()
+	t.Log("do")
+	sl := sled.New(cfg)
 	is.NotNil(sl)
-	err := sl.Open(db_path)
-	is.NoErr(err)
 	sl.Close()
-	if _, err = os.Stat(db_path); os.IsNotExist(err) {
-		is.Fail("DB not created " + db_path)
+
+	t.Log("check")
+	if _, err = os.Stat(dir + "/sled.db"); os.IsNotExist(err) {
+		is.Fail("DB not created " + dir + "/sled.db")
 	}
 }
 
-func temp_dir(is is.I) chan string {
-	dir, err := ioutil.TempDir("/tmp", "sledTest_")
+// TODO: update test for new db path semantics.
+func TestLateOpen(t *testing.T) {
+	t.Log("init")
+	is := is.New(t)
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestLateOpen_")
 	is.NoErr(err)
-	ch := make(chan string)
+	// defer os.RemoveAll(dir)
+	cfg := config.New().WithRoot(dir)
 
-	go func() {
-		ch <- dir + "/sled.db"
-		<-ch // wait for channel to be closed
-		os.RemoveAll(dir)
-	}()
-	return ch
+	t.Log("do")
+	sl := sled.New(cfg)
+	is.NotNil(sl)
+	sl.Open(dir + "/sled.db")
+	sl.Close()
+
+	t.Log("check")
+	if _, err = os.Stat(dir + "/sled.db"); os.IsNotExist(err) {
+		is.Fail("DB not created " + dir + "/sled.db")
+	}
 }
 
 func TestPersistance(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
-	ch := temp_dir(is)
-	db_path := <-ch
-	defer close(ch)
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestPersistance_")
+	is.NoErr(err)
+	defer os.RemoveAll(dir)
 
-	sl, err := sled.Open(db_path)
+	t.Log("do")
+	t.Log(dir)
+	cfg := config.New().WithRoot(dir).WithDB("sled.db")
+
+	// #1
+	sl := sled.New(cfg)
 	is.NoErr(err)
 	sl.Set("foo", "bar")
 	sl.Close()
 
-	sl2, err := sled.Open(db_path)
-	is.NoErr(err)
-	time.Sleep(time.Millisecond)
-	value := sl2.Get("foo")
-	is.NotNil(value)
-	is.Equal(value.(string), "bar")
-	sl2.Close()
+	// #2
+	sl2 := sled.New(cfg)
+	defer sl2.Close()
+	v1, e1 := sl.Get("foo")
+	v2, e2 := sl2.Get("foo")
+	t.Logf("TestPersistance: %T, %v\n", v1, v1)
+	t.Logf("TestPersistance: %T, %v\n", v2, v2)
+	is.NoErr(e1)
+	is.NoErr(e2)
+
+	is.NotNil(v2)
+	is.NotNil(v2)
+
+	t.Log("check")
+	// val := string(v2.([]byte))
+	is.Equal(v2.(string), "bar")
 }
 
-// func TestItterate(t *testing.T) {
-// 	is := is.New(t)
-// 	sl := sled.New()
-
-// 	keys := []string{
-// 		"key1",
-// 		"key2",
-// 	}
-// 	values := []string{
-// 		"value 1",
-// 		"value 42. Oh no, not again.",
-// 	}
-
-// 	err := sl.Set("bucket", keys[0], values[0])
-// 	is.NoErr(err)
-
-// 	err = sl.Set("bucket", keys[1], values[1])
-// 	is.NoErr(err)
-
-// 	i := 0
-// 	sl.Iterate(func(k []byte, v []byte) bool {
-// 		is.Equal(k, keys[i])
-// 		is.Equal(v, values[i])
-// 		i++
-// 		return true
-// 	})
-// }
-
 func TestIterator(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
-	sl := sled.New()
-
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestIterator_")
+	is.NoErr(err)
+	cfg := config.New().WithRoot(dir).WithDB("db.sled")
+	sl := sled.New(cfg)
 	key_list := map[string]int{}
-	var i int
-	for i = 0; i < 1000; i++ {
+	rounds := 5
+	i := 0
+
+	t.Log("do")
+	for i = 0; i < rounds; i++ {
 		key := fmt.Sprintf("%08d", i)
 		key_list[key] = i
 		b, err := json.Marshal(i)
 		is.NoErr(err)
-		sl.Set(key, b)
-		t.Log("key: ", key, ", b: ", b)
-		is.NoErr(err)
+		sl.Set(key, string(b))
+		t.Log("key: ", key, ", b: ", string(b))
 	}
+
+	t.Log("check")
 	for ele := range sl.Iterator(nil) {
-		num, err := strconv.Atoi(string(ele.Value().([]byte)))
+		num, err := strconv.Atoi(ele.Value().(string))
 		is.NoErr(err)
 		t.Log("ele.Key: ", ele.Key(), ", ele.Value: ", num)
 		is.Equal(key_list[ele.Key()], num)

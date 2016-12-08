@@ -1,26 +1,20 @@
 package sled
 
 import (
-	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
-	"time"
 
+	"github.com/Avalanche-io/sled/config"
 	"github.com/Avalanche-io/sled/events"
+	"github.com/Avalanche-io/sled/storage"
 	"github.com/Workiva/go-datastructures/trie/ctrie"
 	"github.com/boltdb/bolt"
+	"github.com/etcenter/c4/asset"
 )
 
-type Sled struct {
-	ct                *ctrie.Ctrie
-	db                *bolt.DB
-	close_wg          *sync.WaitGroup
-	loading           chan struct{}
-	event_index_lock  []sync.Mutex
-	event_subscribers int
-	event_logs        [][]*events.Event
-}
-
+// Sledder is an interface to a KV store with snapshots, iterators, and
+// exclusive Set key functions.
 type KV interface {
 	Set(string, interface{})
 	Get(key string) interface{}
@@ -30,195 +24,180 @@ type KV interface {
 	Delete(string) (interface{}, bool)
 }
 
+// Sled holds pointers to the configuration, database, and the ctrie
+// data structure.  It has no exported data structures.
+type Sled struct {
+	cfg               *config.Config
+	ct                *ctrie.Ctrie
+	db                *bolt.DB
+	st                storage.IO
+	close_wg          *sync.WaitGroup
+	loading           chan struct{}
+	event_index_lock  []sync.Mutex
+	event_subscribers int
+	event_logs        [][]*events.Event
+}
+
+// A key/value pair interface, for use in range operations and signals.
 type Element interface {
 	Key() string
 	Value() interface{}
 }
 
-// A Sledder is a data structure that can can represent itself as key value
-// pairs for storage in a Sled structure.
+// A Sledder is an interface to a data structure that can represent
+// itself as key value pairs. (wip)
 type Sledder interface {
 	Keys() []string
 	WriteToSled(prefix string, sled *Sled) error
 	ReadFromSled(prefix string, sled *Sled) error
 }
 
-var (
-	KeyCreatedEvent events.Type
-	KeyChangedEvent events.Type
-	KeyRemovedEvent events.Type
-	KeySetEvent     events.Type
-	EventTypeCount  int
-)
+// Create a new Sled object with optional custom configuration.
+func New(configs ...*config.Config) *Sled {
+	cfg := config.DefaultConfig()
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
+	cfg.Mkdirs()
 
-func New() *Sled {
 	ct := ctrie.New(nil)
 	event_keys(ct)
 	wg := sync.WaitGroup{}
 	locker := make([]sync.Mutex, EventTypeCount)
 	event_logs := make([][]*events.Event, EventTypeCount)
-	s := Sled{ct, nil, &wg, nil, locker, 0, event_logs}
+	st := storage.New(cfg)
+	s := Sled{cfg, ct, nil, st, &wg, nil, locker, 0, event_logs}
+	if s.cfg.DB != nil {
+		err := s.Open(*s.cfg.DbPath())
+		if err != nil {
+			panic(err)
+		}
+	}
 	return &s
 }
 
-func Open(path string) (*Sled, error) {
-	s := New()
-	err := s.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	s.createBuckets()
-	s.loadAllKeys()
-	return s, err
-}
-
-func (s *Sled) Close() error {
-	s.Wait()
-	return s.db.Close()
-}
-
-func (s *Sled) Wait() {
-	if s.close_wg != nil {
-		s.close_wg.Wait()
-	}
-}
-
-func init() {
-	KeyCreatedEvent = events.AddType("key-created")
-	KeyChangedEvent = events.AddType("key-changed")
-	KeyRemovedEvent = events.AddType("key-removed")
-	KeySetEvent = events.AddType("key-set")
-	EventTypeCount = 4
-}
-
-func event_keys(s *ctrie.Ctrie) {
-	// s.Insert([]byte(".events/"+string(KeyCreatedEvent)+"/next_id"), 0)
-	// s.Insert([]byte(".events/"+string(KeyChangedEvent)+"/next_id"), 0)
-	// s.Insert([]byte(".events/"+string(KeyRemovedEvent)+"/next_id"), 0)
-	// s.Insert([]byte(".events/"+string(KeySetEvent)+"/next_id"), 0)
-
-}
-
-func event_index_key(t events.Type) []byte {
-	return []byte(".events/" + string(t) + "/next_id")
-}
-
-func event_key(t events.Type, id int) []byte {
-	return []byte(fmt.Sprintf(".events/%s/%d", t, id))
-}
-
-func (s *Sled) event_id(t events.Type) int {
-	index_key := event_index_key(t)
-	v, _ := s.ct.Lookup(index_key)
-	id := v.(int)
-	s.ct.Insert(index_key, id+1)
-	return id
-}
-
-func (s *Sled) get_events_for(t events.Type, start_id int) (event_slice []*events.Event, end_id int) {
-	s.event_index_lock[t].Lock()
-	event_slice = s.event_logs[t][start_id:]
-	end_id = len(s.event_logs[t])
-	s.event_index_lock[t].Unlock()
-	// v, _ := s.ct.Lookup(event_index_key(t))
-	// end_id = v.(int)
-	// for i := start_id; i < end_id; i++ {
-	// 	s.event_index_lock[t].Lock()
-	// 	e, _ := s.ct.Lookup(event_key(t, i))
-	// 	s.event_index_lock[t].Unlock()
-
-	// 	event_slice = append(event_slice, e.(*events.Event))
-	// }
-	return
-}
-
-type event_subscription struct {
-	sled       *Sled
-	event_type events.Type
-	last_id    int
-	event_chan chan *events.Event
-	closing    chan chan error
-	args       []string
-}
-
-func (s *event_subscription) Events() <-chan *events.Event {
-	return s.event_chan
-}
-
-func (s *event_subscription) Close() error {
-	errc := make(chan error)
-	s.closing <- errc
-	err := <-errc
-	s.sled.event_subscribers--
-	return err
-}
-
-func (s *event_subscription) loop() {
+// Assigns value to key, replacing any previous values.
+func (s *Sled) Set(key string, value interface{}) error {
+	var old_value interface{}
+	var id *asset.ID
 	var err error
-	var pending []*events.Event // appended by fetch; consumed by send
-	var next time.Time
-	i := 0
-	for {
-		// channels for cases
-		i++
-		var first *events.Event
-		var events chan *events.Event // is nil by default
-		if len(pending) > 0 {
-			first = pending[0]
-			events = s.event_chan // enables send by setting events not non nil value
-		}
-		var fetchDelay time.Duration
-		if now := time.Now(); next.After(now) {
-			fetchDelay = next.Sub(now)
-		}
-		startFetch := time.After(fetchDelay)
-		select {
-		case <-startFetch:
-			// var fetched []*events.Event
-			fetched, end_id := s.sled.get_events_for(s.event_type, s.last_id)
-			next = time.Now().Add(1 * time.Millisecond)
-			if err != nil {
-				break
-			}
-			pending = append(pending, fetched...)
-			s.last_id = end_id
-		case events <- first:
-			pending = pending[1:]
-		case errc := <-s.closing:
-			errc <- err
-			close(s.event_chan)
-			return
+	existed := false
+	size := reflect.TypeOf(value).Size()
+	// fmt.Printf("Set size: %d\n", size)
+	save_to_file := size > 64
+	save_to_db := s.db != nil
+	send_events := s.event_subscribers > 0
+
+	if send_events {
+		old_value, existed = s.ct.Lookup([]byte(key))
+	}
+	// fmt.Printf("Set type: %T\n", value)
+	// switch value.(type) {
+	// case []byte:
+	// 	fmt.Printf("type is byte!! len = %d\n", len(value.([]byte)))
+	// 	data = value.([]byte)
+	// case string:
+	// 	data = []byte(value.(string))
+	// default:
+	// 	data, err = json.Marshal(value)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
+	// if len(data) <= 64 {
+	// 	fmt.Printf("Set data: %s\n", string(data))
+	// } else {
+	// 	fmt.Printf("Set data: %d\n", len(data))
+	// }
+
+	// id, err = asset.Identify(bytes.NewReader(data))
+	// if err != nil {
+	// 	return err
+	// }
+	// fmt.Printf("Set id: %s\n", id.String())
+
+	id, err = s.st.Save(value)
+	if err != nil {
+		return err
+	}
+	// fmt.Printf("Set Key/ID: %s, %s\n", key, id)
+	// fmt.Printf("Set Value: %T, %v\n", value, value)
+
+	if save_to_db {
+		err = s.put_db("assets", key, id)
+		if err != nil {
+			return SledError(err.Error())
 		}
 	}
-}
 
-func (s *Sled) LogEvent(t events.Type, key string, value interface{}) {
-	go func() {
-		now := time.Now().UTC()
-		// TODO: remove index locking
-		s.event_index_lock[t].Lock()
-		id := len(s.event_logs[t])
-		// id := s.event_id(t)
-		e := events.New(id, t, key, value, now) // Event{id, t, key, value, &now}
-		// event_key := fmt.Sprintf(".events/%s/%d", t, id)
-		// s.ct.Insert([]byte(event_key), &e)
-		s.event_logs[t] = append(s.event_logs[t], e)
-		s.event_index_lock[t].Unlock()
-	}()
-}
-
-func (s *Sled) Subscribe(t events.Type, args ...string) events.Subscription {
-	sub := &event_subscription{
-		sled:       s,
-		event_type: t,
-		last_id:    0,
-		event_chan: make(chan *events.Event),
-		closing:    make(chan chan error),
-		args:       args,
+	if save_to_file {
+		s.ct.Insert([]byte(key), *id)
+	} else {
+		s.ct.Insert([]byte(key), value)
 	}
-	s.event_subscribers++
-	go sub.loop()
-	return sub
+
+	if send_events {
+		if !existed {
+			s.LogEvent(KeyCreatedEvent, key, value)
+		} else {
+			s.LogEvent(KeyChangedEvent, key, old_value)
+		}
+		s.LogEvent(KeySetEvent, key, value)
+	}
+	return nil
+}
+
+// Get return the value stored for the given key, or nil if no value was found.
+func (s *Sled) Get(key string) (interface{}, error) {
+	var val interface{}
+	var ok bool
+	val, ok = s.ct.Lookup([]byte(key))
+	if val == nil {
+		id, err := s.get_db("assets", key)
+		if err != nil {
+			return nil, err
+		}
+		size, err := s.st.SizeOf(id)
+		if err != nil {
+			return nil, err
+		}
+		_ = size
+		// fmt.Println("Get key: %s, %d\n", id, size)
+		return s.st.Load(id)
+	}
+
+	if ok {
+		switch val.(type) {
+		case nil:
+			return nil, nil
+		case asset.ID:
+			id := val.(asset.ID)
+			// fmt.Println("\n+++++++++++++\n")
+			// fmt.Printf("type: %T\n", val)
+			// fmt.Println("")
+			// fmt.Printf("id.String(): %s\n", (&id).String())
+			// fmt.Println("")
+			// fmt.Print(id)
+			// fmt.Println("\n+++++++++++++\n")
+			// fmt.Printf("Get (is asset.ID): len")
+			return s.st.Load(&id)
+		default:
+			return val, nil
+		}
+	}
+	return nil, nil
+}
+
+// Snapshot returns a single point in time image of the Sled.
+// Snapshot is fast and non blocking.
+func (s *Sled) Snapshot() *Sled {
+	ct := s.ct.Snapshot()
+	event_keys(ct)
+	locker := make([]sync.Mutex, EventTypeCount)
+	event_logs := make([][]*events.Event, EventTypeCount)
+
+	sl := Sled{s.cfg, ct, nil, s.st, s.close_wg, nil, locker, 0, event_logs}
+	return &sl
 }
 
 // Delete removes a key and value, and returns it's previous value with
@@ -233,77 +212,29 @@ func (s *Sled) Delete(key string) (value interface{}, existed bool) {
 	return
 }
 
-// SetNil is exclusive Set.  It only assigns the value to key,
-// if the key is not set already.  It returns true if the key was
-// empty and the value assigned, otherwise false.
+// SetNil is exclusive Set.  It only assigns the value to the key,
+// if the key is not already set.  It returns true if the assignment succeed.
 func (s *Sled) SetNil(key string, value interface{}) bool {
-	_, existed := s.ct.Lookup([]byte(key))
-	if existed {
-		return false
+	if _, existed := s.ct.Lookup([]byte(key)); !existed {
+		s.Set(key, value)
 	}
-	s.ct.Insert([]byte(key), value)
-	if s.event_subscribers > 0 {
-		s.LogEvent(KeyCreatedEvent, key, value)
-		s.LogEvent(KeySetEvent, key, value)
-	}
-	if s.db != nil {
-		value_json, err := json.Marshal(value)
-		if err != nil {
-			panic(err)
-		}
-		err = s.put_db(s.db, "assets", []byte(key), []byte(value_json))
-		if err != nil {
-			panic(err)
-		}
-	}
-	return true
+	return false
 }
 
-// Set stores value in key.
-func (s *Sled) Set(key string, value interface{}) {
-	var old_value interface{}
-	existed := false
-	if s.event_subscribers > 0 {
-		old_value, existed = s.ct.Lookup([]byte(key))
-		s.ct.Insert([]byte(key), value)
-		if !existed {
-			s.LogEvent(KeyCreatedEvent, key, value)
-		} else {
-			s.LogEvent(KeyChangedEvent, key, old_value)
-		}
-		s.LogEvent(KeySetEvent, key, value)
-	} else {
-		s.ct.Insert([]byte(key), value)
-	}
-
-	if s.db != nil {
-		value_json, err := json.Marshal(value)
+func (s *Sled) GetID(key string) *asset.ID {
+	val, _ := s.ct.Lookup([]byte(key))
+	switch val.(type) {
+	case asset.ID:
+		id := val.(asset.ID)
+		fmt.Printf("GetID: len(val) == %s\n", (&id).String())
+		return &id
+	default:
+		id, err := s.st.Save(val)
 		if err != nil {
 			panic(err)
 		}
-		err = s.put_db(s.db, "assets", []byte(key), []byte(value_json))
-		if err != nil {
-			panic(err)
-		}
-	}
-}
-
-// Snapshot returns a single point in time image of the Sled.
-// Snapshot is fast and non blocking.
-func (s *Sled) Snapshot() *Sled {
-	ct := s.ct.Snapshot()
-	event_keys(ct)
-	locker := make([]sync.Mutex, EventTypeCount)
-	event_logs := make([][]*events.Event, EventTypeCount)
-	sl := Sled{ct, nil, s.close_wg, nil, locker, 0, event_logs}
-	return &sl
-}
-
-// Get return the value stored for the given key, or nil if no value was found.
-func (s *Sled) Get(key string) interface{} {
-	val, ok := s.ct.Lookup([]byte(key))
-	if ok {
-		return val
+		return id
+		// panic("Get ID, Unhanded type.")
 	}
 	return nil
 }
