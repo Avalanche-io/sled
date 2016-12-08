@@ -8,26 +8,43 @@
 
 Sled is a very high performance thread safe Key/Value store based on a _ctrie_ data structure with automatic persistence to disk via non-blocking snapshots.
 
-Pre-defind accessors:
+## Features
 
-- Assets _the objects_
-- Attributes _the metadata_
+- Multi-thread safe
+- Non-blocking
+- Optional database storage
+- Optional event notifications
 
-Versioned access via:
+More to come: Versions, TTL (time to live), performance improvements, and benchmarks.
 
-- Versions
-- Branches 
-- Tags
+## Example Usage
 
-Also optional TTL, and Watcher interfaces to set _time to live_ for automatic key expiration, and notifications for key events.
+```go
+import(
+    "fmt"
 
-## Notes
+    "github.com/Avalanche-io/sled"
+    "github.com/Avalanche-io/sled/config"
+)
 
-Key events include:
+func main() {
+    // Add database storage to the configuration,
+    // in the default location ($HOME/.sled/sled.db)
+    cfg := config.New().WithDB("sled.db")
+    sl := sled.New(cfg)
+    defer sl.Close()
 
-- Created
-- Updated
-- Saved
-- Destroyed
-- Expired
+    key := "forty two"
+    sl.Set(key, 42)
 
+    v, err := sl.Get("forty two")
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("key: %s, \tvalue: %v, \ttype: %T\n", key, v, v)
+
+}
+
+```
