@@ -1,6 +1,7 @@
 # Sled 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![GoDoc](https://godoc.org/github.com/Avalanche-io/sled?status.svg)](https://godoc.org/github.com/Avalanche-io/sled)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Avalanche-io/sled)](https://goreportcard.com/report/github.com/Avalanche-io/sled)
 [![Stories in Ready](https://badge.waffle.io/Avalanche-io/sled.png?label=ready&title=Ready)](https://waffle.io/Avalanche-io/sled)
 [![Build Status](https://travis-ci.org/Avalanche-io/sled.svg?branch=master)](https://travis-ci.org/Avalanche-io/sled)
 [![Coverage Status](https://coveralls.io/repos/github/Avalanche-io/sled/badge.svg?branch=master)](https://coveralls.io/github/Avalanche-io/sled?branch=master)
