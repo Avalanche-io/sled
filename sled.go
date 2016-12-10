@@ -16,8 +16,9 @@ import (
 // Sledder is an interface to a KV store with snapshots, iterators, and
 // exclusive Set key functions.
 type KV interface {
-	Set(string, interface{})
-	Get(key string) interface{}
+	Set(string, interface{}) error
+	Get(key string) (interface{}, error)
+	GetID(key string) *asset.ID
 	Iterator(<-chan struct{}) <-chan Element
 	Snapshot() *Sled
 	SetNil(string, interface{}) bool
