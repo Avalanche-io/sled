@@ -1,7 +1,6 @@
 package sled
 
 import (
-	"fmt"
 	"reflect"
 	"sync"
 
@@ -84,7 +83,6 @@ func (s *Sled) Set(key string, value interface{}) error {
 	var err error
 	existed := false
 	size := reflect.TypeOf(value).Size()
-	// fmt.Printf("Set size: %d\n", size)
 	save_to_file := size > 64
 	save_to_db := s.db != nil
 	send_events := s.event_subscribers > 0
@@ -92,46 +90,19 @@ func (s *Sled) Set(key string, value interface{}) error {
 	if send_events {
 		old_value, existed = s.ct.Lookup([]byte(key))
 	}
-	// fmt.Printf("Set type: %T\n", value)
-	// switch value.(type) {
-	// case []byte:
-	// 	fmt.Printf("type is byte!! len = %d\n", len(value.([]byte)))
-	// 	data = value.([]byte)
-	// case string:
-	// 	data = []byte(value.(string))
-	// default:
-	// 	data, err = json.Marshal(value)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// }
-	// if len(data) <= 64 {
-	// 	fmt.Printf("Set data: %s\n", string(data))
-	// } else {
-	// 	fmt.Printf("Set data: %d\n", len(data))
-	// }
-
-	// id, err = asset.Identify(bytes.NewReader(data))
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Printf("Set id: %s\n", id.String())
-
-	id, err = s.st.Save(value)
-	if err != nil {
-		return err
-	}
-	// fmt.Printf("Set Key/ID: %s, %s\n", key, id)
-	// fmt.Printf("Set Value: %T, %v\n", value, value)
-
-	if save_to_db {
-		err = s.put_db("assets", key, id)
-		if err != nil {
-			return SledError(err.Error())
-		}
-	}
 
 	if save_to_file {
+		id, err = s.st.Save(value)
+		if err != nil {
+			return err
+		}
+
+		if save_to_db {
+			err = s.put_db("assets", key, id)
+			if err != nil {
+				return SledError(err.Error())
+			}
+		}
 		s.ct.Insert([]byte(key), *id)
 	} else {
 		s.ct.Insert([]byte(key), value)
@@ -163,7 +134,7 @@ func (s *Sled) Get(key string) (interface{}, error) {
 			return nil, err
 		}
 		_ = size
-		// fmt.Println("Get key: %s, %d\n", id, size)
+
 		return s.st.Load(id)
 	}
 
@@ -171,17 +142,9 @@ func (s *Sled) Get(key string) (interface{}, error) {
 		switch val.(type) {
 		case nil:
 			return nil, nil
-		case asset.ID:
-			id := val.(asset.ID)
-			// fmt.Println("\n+++++++++++++\n")
-			// fmt.Printf("type: %T\n", val)
-			// fmt.Println("")
-			// fmt.Printf("id.String(): %s\n", (&id).String())
-			// fmt.Println("")
-			// fmt.Print(id)
-			// fmt.Println("\n+++++++++++++\n")
-			// fmt.Printf("Get (is asset.ID): len")
-			return s.st.Load(&id)
+		case *asset.ID:
+			id := val.(*asset.ID)
+			return s.st.Load(id)
 		default:
 			return val, nil
 		}
@@ -227,7 +190,7 @@ func (s *Sled) GetID(key string) *asset.ID {
 	switch val.(type) {
 	case asset.ID:
 		id := val.(asset.ID)
-		fmt.Printf("GetID: len(val) == %s\n", (&id).String())
+		// fmt.Printf("GetID: len(val) == %s\n", (&id).String())
 		return &id
 	default:
 		id, err := s.st.Save(val)

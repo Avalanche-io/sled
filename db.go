@@ -30,7 +30,6 @@ func (s *Sled) Open(filepath string) error {
 		panic("tried to open /tmp/sled.db")
 	}
 
-	// fmt.Printf("Open %s\n", filepath)
 	db, err := bolt.Open(filepath, 0777, nil)
 	if err != nil {
 		return SledError(err.Error())
@@ -51,7 +50,27 @@ func (s *Sled) Open(filepath string) error {
 // Wait for database operations to complete, and close database.
 func (s *Sled) Close() error {
 	s.Wait()
-	err := s.db.Close()
+	err := s.db.Batch(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("assets"))
+		for ele := range s.ct.Iterator(nil) {
+			p := b.Get(ele.Key)
+			if p == nil {
+				id, err := s.st.Save(ele.Value)
+				if err != nil {
+					return err
+				}
+				err = b.Put(ele.Key, id.RawBytes())
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	err = s.db.Close()
 	s.db = nil
 	return err
 }
@@ -146,6 +165,9 @@ func (s *Sled) createBuckets() error {
 
 // put sets the value of a key for a given bucket
 func (s *Sled) put_db(bucket string, key string, id *asset.ID) error {
+	if id == nil {
+		return errors.New("Id is nil")
+	}
 	return s.db.Batch(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		return b.Put([]byte(key), id.RawBytes())
@@ -158,6 +180,9 @@ func (s *Sled) get_db(bucket string, key string) (id *asset.ID, err error) {
 	err = s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		data = b.Get([]byte(key))
+		if data == nil {
+			return errors.New("db: No such key. " + key)
+		}
 		if len(data) != 64 {
 			return errors.New("Value stored in database is not a C4 ID.")
 		}
