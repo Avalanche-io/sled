@@ -84,14 +84,16 @@ func (s *Sled) Wait() {
 
 func (s *Sled) loadAllKeys() {
 	s.loading = make(chan struct{})
-	s.close_wg.Add(1)
-	go func() {
-		defer s.close_wg.Done()
-		for ele := range s.db_iterator("assets", nil, nil) {
-			s.ct.Insert(ele.Key(), ele.Id())
-		}
-		close(s.loading)
-	}()
+	// s.close_wg.Add(1)
+	// go func() {
+	// defer s.close_wg.Done()
+	for ele := range s.db_iterator("assets", nil, nil) {
+		p := sledPointer{ele.Id()}
+		// s.ct.Insert(ele.Key(), ele.Id())
+		s.ct.Insert(ele.Key(), &p)
+	}
+	// close(s.loading)
+	// }()
 }
 
 type element struct {
@@ -190,4 +192,16 @@ func (s *Sled) get_db(bucket string, key string) (id *asset.ID, err error) {
 		return nil
 	})
 	return
+}
+
+func (s *Sled) delete_db(bucket string, key string) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		err := b.Delete([]byte(key))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }

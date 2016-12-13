@@ -61,7 +61,7 @@ func TestCreatesDBfile(t *testing.T) {
 	is := is.New(t)
 	dir, err := ioutil.TempDir("/tmp", "sledTest_TestCreatesDBfile_")
 	is.NoErr(err)
-	// defer os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
 	cfg := config.New().WithRoot(dir).WithDB("sled.db")
 
 	t.Log("do")
@@ -146,6 +146,7 @@ func TestIterator(t *testing.T) {
 	is := is.New(t)
 	dir, err := ioutil.TempDir("/tmp", "sledTest_TestIterator_")
 	is.NoErr(err)
+	defer os.RemoveAll(dir)
 	cfg := config.New().WithRoot(dir).WithDB("db.sled")
 	sl := sled.New(cfg)
 	key_list := map[string]int{}
@@ -168,5 +169,69 @@ func TestIterator(t *testing.T) {
 		is.NoErr(err)
 		t.Log("ele.Key: ", ele.Key(), ", ele.Value: ", num)
 		is.Equal(key_list[ele.Key()], num)
+	}
+}
+
+func TestDelete(t *testing.T) {
+	t.Log("init")
+	is := is.New(t)
+	b := make([]byte, 1024)
+	_, err := rand.Read(b)
+	is.NoErr(err)
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestDelete_")
+	is.NoErr(err)
+	defer os.RemoveAll(dir)
+	cfg := config.New().WithRoot(dir).WithDB("db.sled")
+	sl := sled.New(cfg)
+
+	t.Log("do")
+	err = sl.Set("foo", "bar")
+	is.NoErr(err)
+	v, existed := sl.Delete("foo")
+	is.True(existed)
+	is.Equal(v.(string), "bar")
+	err = sl.Set("baz", b)
+	v, existed = sl.Delete("baz")
+	is.True(existed)
+	is.Equal(v.([]byte), b)
+
+	t.Log("check")
+
+	for ele := range sl.Iterator(nil) {
+		is.Fail("There should be no elements in the sled. " + ele.Key())
+	}
+}
+
+func TestPersistantDelete(t *testing.T) {
+	t.Log("init")
+	is := is.New(t)
+	b := make([]byte, 1024)
+	_, err := rand.Read(b)
+	is.NoErr(err)
+	dir, err := ioutil.TempDir("/tmp", "sledTest_TestDelete_")
+	is.NoErr(err)
+	defer os.RemoveAll(dir)
+	cfg := config.New().WithRoot(dir).WithDB("db.sled")
+	sl := sled.New(cfg)
+
+	t.Log("do")
+	err = sl.Set("foo", "bar")
+	is.NoErr(err)
+	v, existed := sl.Delete("foo")
+	is.True(existed)
+	is.Equal(v.(string), "bar")
+	err = sl.Set("baz", b)
+	v, existed = sl.Delete("baz")
+	is.True(existed)
+	is.Equal(v.([]byte), b)
+	sl.Close()
+	// #2
+	sl2 := sled.New(cfg)
+	defer sl2.Close()
+
+	t.Log("check")
+
+	for ele := range sl2.Iterator(nil) {
+		is.Fail("There should be no elements in the sled. " + ele.Key())
 	}
 }

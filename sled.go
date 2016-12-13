@@ -1,7 +1,7 @@
 package sled
 
 import (
-	"reflect"
+	"errors"
 	"sync"
 
 	"github.com/Avalanche-io/sled/config"
@@ -38,6 +38,13 @@ type Sled struct {
 	event_logs        [][]*events.Event
 }
 
+// A sled pointer is used to dereference values in the sled.
+// This happens when the data is large, or not yet loaded.
+//
+type sledPointer struct {
+	Id *asset.ID
+}
+
 // A key/value pair interface, for use in range operations and signals.
 type Element interface {
 	Key() string
@@ -46,11 +53,11 @@ type Element interface {
 
 // A Sledder is an interface to a data structure that can represent
 // itself as key value pairs. (wip)
-type Sledder interface {
-	Keys() []string
-	WriteToSled(prefix string, sled *Sled) error
-	ReadFromSled(prefix string, sled *Sled) error
-}
+// type Sledder interface {
+// 	Keys() []string
+// 	WriteToSled(prefix string, sled *Sled) error
+// 	ReadFromSled(prefix string, sled *Sled) error
+// }
 
 // Create a new Sled object with optional custom configuration.
 func New(configs ...*config.Config) *Sled {
@@ -79,34 +86,24 @@ func New(configs ...*config.Config) *Sled {
 // Assigns value to key, replacing any previous values.
 func (s *Sled) Set(key string, value interface{}) error {
 	var old_value interface{}
-	var id *asset.ID
-	var err error
-	existed := false
-	size := reflect.TypeOf(value).Size()
-	save_to_file := size > 64
-	save_to_db := s.db != nil
+	var existed bool
 	send_events := s.event_subscribers > 0
 
 	if send_events {
 		old_value, existed = s.ct.Lookup([]byte(key))
 	}
 
-	if save_to_file {
-		id, err = s.st.Save(value)
+	if s.db != nil {
+		id, err := s.st.Save(value)
 		if err != nil {
 			return err
 		}
-
-		if save_to_db {
-			err = s.put_db("assets", key, id)
-			if err != nil {
-				return SledError(err.Error())
-			}
+		err = s.put_db("assets", key, id)
+		if err != nil {
+			return SledError(err.Error())
 		}
-		s.ct.Insert([]byte(key), *id)
-	} else {
-		s.ct.Insert([]byte(key), value)
 	}
+	s.ct.Insert([]byte(key), value)
 
 	if send_events {
 		if !existed {
@@ -121,35 +118,78 @@ func (s *Sled) Set(key string, value interface{}) error {
 
 // Get return the value stored for the given key, or nil if no value was found.
 func (s *Sled) Get(key string) (interface{}, error) {
-	var val interface{}
-	var ok bool
-	val, ok = s.ct.Lookup([]byte(key))
-	if val == nil {
-		id, err := s.get_db("assets", key)
+
+	val, ok := s.ct.Lookup([]byte(key))
+	if !ok {
+		// if val == nil {
+		// 	id, err := s.get_db("assets", key)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	size, err := s.st.SizeOf(id)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	_ = size
+
+		// 	return s.st.Load(id)
+		// }
+		return nil, errors.New("Key does not exist.")
+	}
+
+	switch val.(type) {
+	case *sledPointer:
+		p := val.(*sledPointer)
+		v, err := s.st.Load(p.Id)
 		if err != nil {
 			return nil, err
 		}
-		size, err := s.st.SizeOf(id)
-		if err != nil {
-			return nil, err
-		}
-		_ = size
-
-		return s.st.Load(id)
+		s.ct.Insert([]byte(key), v)
+		val = v
 	}
 
-	if ok {
-		switch val.(type) {
-		case nil:
-			return nil, nil
-		case *asset.ID:
-			id := val.(*asset.ID)
-			return s.st.Load(id)
-		default:
-			return val, nil
+	return val, nil
+}
+
+// Delete removes a key and value, and returns it's previous value with
+// an existed flat that will be true if the key was not empty.
+func (s *Sled) Delete(key string) (value interface{}, existed bool) {
+	value, existed = s.ct.Remove([]byte(key))
+	err := s.delete_db("assets", key)
+	if err != nil {
+		value = err
+		return
+	}
+	if s.event_subscribers > 0 {
+		if existed {
+			s.LogEvent(KeyRemovedEvent, key, value)
 		}
 	}
-	return nil, nil
+	return
+}
+
+// Iterator returns the key value pair for each key in the sled.
+// It takes an optional cancel channel which can be closed to stop iterating.
+// The key and value are returned in an 'Element' interface.
+func (s *Sled) Iterator(cancel <-chan struct{}) <-chan Element {
+	out := make(chan Element)
+	c := make(chan struct{})
+	go func() {
+		defer close(out)
+		for e := range s.ct.Iterator(c) {
+			entry := ele{
+				string(e.Key),
+				e.Value,
+			}
+			select {
+			case out <- &entry:
+			case <-cancel:
+				close(c)
+			}
+		}
+
+	}()
+	return out
 }
 
 // Snapshot returns a single point in time image of the Sled.
@@ -162,18 +202,6 @@ func (s *Sled) Snapshot() *Sled {
 
 	sl := Sled{s.cfg, ct, nil, s.st, s.close_wg, nil, locker, 0, event_logs}
 	return &sl
-}
-
-// Delete removes a key and value, and returns it's previous value with
-// an existed flat that will be true if the key was not empty.
-func (s *Sled) Delete(key string) (value interface{}, existed bool) {
-	value, existed = s.ct.Remove([]byte(key))
-	if s.event_subscribers > 0 {
-		if existed {
-			s.LogEvent(KeyRemovedEvent, key, value)
-		}
-	}
-	return
 }
 
 // SetNil is exclusive Set.  It only assigns the value to the key,
@@ -214,25 +242,4 @@ func (e *ele) Key() string {
 
 func (e *ele) Value() interface{} {
 	return e.v
-}
-
-func (s *Sled) Iterator(cancel <-chan struct{}) <-chan Element {
-	out := make(chan Element)
-	c := make(chan struct{})
-	go func() {
-		defer close(out)
-		for e := range s.ct.Iterator(c) {
-			entry := ele{
-				string(e.Key),
-				e.Value,
-			}
-			select {
-			case out <- &entry:
-			case <-cancel:
-				close(c)
-			}
-		}
-
-	}()
-	return out
 }
