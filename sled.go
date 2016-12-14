@@ -33,6 +33,8 @@ type Sled struct {
 	st                storage.IO
 	close_wg          *sync.WaitGroup
 	loading           chan struct{}
+	file_ch           chan Tx
+	err_ch            chan error
 	event_index_lock  []sync.Mutex
 	event_subscribers int
 	event_logs        [][]*events.Event
@@ -49,6 +51,11 @@ type sledPointer struct {
 type Element interface {
 	Key() string
 	Value() interface{}
+}
+
+type Tx interface {
+	Element
+	Action() string
 }
 
 // A Sledder is an interface to a data structure that can represent
@@ -73,14 +80,22 @@ func New(configs ...*config.Config) *Sled {
 	locker := make([]sync.Mutex, EventTypeCount)
 	event_logs := make([][]*events.Event, EventTypeCount)
 	st := storage.New(cfg)
-	s := Sled{cfg, ct, nil, st, &wg, nil, locker, 0, event_logs}
+	s := Sled{cfg, ct, nil, st, &wg, nil, nil, nil, locker, 0, event_logs}
+
 	if s.cfg.DB != nil {
-		err := s.Open(*s.cfg.DbPath())
+		err := s.Open(s.cfg.DbPath())
 		if err != nil {
 			panic(err)
 		}
+	} else {
+		s.Open(nil)
 	}
 	return &s
+}
+
+func (s *Sled) persist(e Element) {
+	//Hmm: Writes to channel even if we have no storage
+	s.file_ch <- &tx{"save", e.Key(), e.Value()}
 }
 
 // Assigns value to key, replacing any previous values.
@@ -94,14 +109,15 @@ func (s *Sled) Set(key string, value interface{}) error {
 	}
 
 	if s.db != nil {
-		id, err := s.st.Save(value)
-		if err != nil {
-			return err
-		}
-		err = s.put_db("assets", key, id)
-		if err != nil {
-			return SledError(err.Error())
-		}
+		s.persist(&ele{key, value})
+		// id, err := s.st.Save(value)
+		// if err != nil {
+		// 	return err
+		// }
+		// err = s.put_db("assets", key, id)
+		// if err != nil {
+		// 	return SledError(err.Error())
+		// }
 	}
 	s.ct.Insert([]byte(key), value)
 
@@ -155,11 +171,8 @@ func (s *Sled) Get(key string) (interface{}, error) {
 // an existed flat that will be true if the key was not empty.
 func (s *Sled) Delete(key string) (value interface{}, existed bool) {
 	value, existed = s.ct.Remove([]byte(key))
-	err := s.delete_db("assets", key)
-	if err != nil {
-		value = err
-		return
-	}
+	//Hmm: Writes to channel, even if we have no storage
+	s.file_ch <- &tx{"delete", key, nil}
 	if s.event_subscribers > 0 {
 		if existed {
 			s.LogEvent(KeyRemovedEvent, key, value)
@@ -200,7 +213,7 @@ func (s *Sled) Snapshot() *Sled {
 	locker := make([]sync.Mutex, EventTypeCount)
 	event_logs := make([][]*events.Event, EventTypeCount)
 
-	sl := Sled{s.cfg, ct, nil, s.st, s.close_wg, nil, locker, 0, event_logs}
+	sl := Sled{s.cfg, ct, nil, s.st, s.close_wg, nil, nil, nil, locker, 0, event_logs}
 	return &sl
 }
 

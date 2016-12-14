@@ -15,13 +15,16 @@ import (
 )
 
 func TestSubscribeToEvent(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 
+	t.Log("go")
 	sub := sl.Subscribe(events.StringToType("key-set"))
 	go func() {
 		time.Sleep(1 * time.Second)
 		for i := 0; i < 1000; i++ {
+			// t.Logf("i: %d", i)
 			key := fmt.Sprintf("/foo_%04d", i)
 			sl.Set(key, i)
 		}
@@ -35,7 +38,9 @@ func TestSubscribeToEvent(t *testing.T) {
 		is.NoErr(err)
 	}()
 
+	t.Log("check")
 	for e := range sub.Events() {
+		// t.Logf("value: %v", e.Value)
 		is.Equal(e.Type, events.StringToType("key-set"))
 		count++
 		if count == 1000 {
@@ -43,13 +48,13 @@ func TestSubscribeToEvent(t *testing.T) {
 		}
 	}
 	is.Equal(count, 1000)
-
+	t.Log("done")
 }
 
 func TestSubscribeToSpacificEvents(t *testing.T) {
+	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
-
 	tests := []struct {
 		Type   events.Type
 		Key    string
@@ -91,7 +96,10 @@ func TestSubscribeToSpacificEvents(t *testing.T) {
 		event_type_counts[t.Type] = t.Count
 	}
 	var event_type_mutex sync.Mutex
+
+	t.Log("do")
 	for _, x := range tests {
+		t.Logf("test: %s, %s", x.Type, x.Key)
 		sub := sl.Subscribe(x.Type, x.Key)
 		subscriptions = append(subscriptions, sub)
 		go func(expected_values []string, expected_count int) {
@@ -125,7 +133,7 @@ func TestSubscribeToSpacificEvents(t *testing.T) {
 		if v != 0 {
 			t.Log("Test", i, "failed:", tests)
 			t.Log("Event: ", tests[i].Type.String())
-			t.Log("event_type_counts:", event_type_counts)
+			// t.Log("event_type_counts:", event_type_counts)
 		}
 		is.Equal(v, 0)
 	}
@@ -137,7 +145,7 @@ func TestMultithreadEvents(t *testing.T) {
 	is := is.New(t)
 	sl := sled.New()
 
-	threads := 8
+	threads := 12
 	keys := 100000 / threads
 
 	sub := sl.Subscribe(events.StringToType("key-set"))
@@ -254,4 +262,10 @@ func TestMultithreadEvents(t *testing.T) {
 	t.Log("Map[string]interface{} with Locks")
 	t.Log("  Keys Per Second:", int(float64(keys)/map_time.Seconds()))
 	t.Log("With Events:", with_time, "Without Events:", wo_time, "Locking Map", map_time)
+	if wo_time > map_time {
+		t.Logf("Not there yet. %.3f times slower then just using a map with locks", float64(wo_time)/float64(map_time))
+	} else {
+		t.Logf("Got it! %.3f times faster then a map with locks.", float64(map_time)/float64(wo_time))
+	}
+
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/Avalanche-io/sled/storage"
 	"github.com/boltdb/bolt"
 	"github.com/etcenter/c4/asset"
 )
@@ -21,16 +22,42 @@ func (e createBucketError) Error() string {
 	return "Error creating bucket: " + string(e)
 }
 
+type tx struct {
+	t string
+	k string
+	v interface{}
+}
+
+func (t *tx) Action() string {
+	return t.t
+}
+
+func (t *tx) Key() string {
+	return t.k
+}
+
+func (t *tx) Value() interface{} {
+	return t.v
+}
+
 // Open the sled database at the provided path, or create a new one.
-func (s *Sled) Open(filepath string) error {
+func (s *Sled) Open(filepath *string) error {
+
 	if s.db != nil {
 		return dbOpenError
 	}
-	if filepath == "/tmp/sled.db" {
-		panic("tried to open /tmp/sled.db")
+
+	s.file_ch = make(chan Tx)
+	db_ch := make(chan Tx)
+	s.err_ch = make(chan error)
+
+	if filepath == nil {
+		go storage_thread_noop(s.st, s.file_ch, db_ch, s.err_ch)
+		go db_thread_noop(s.db, db_ch, s.err_ch)
+		return nil
 	}
 
-	db, err := bolt.Open(filepath, 0777, nil)
+	db, err := bolt.Open(*filepath, 0777, nil)
 	if err != nil {
 		return SledError(err.Error())
 	}
@@ -38,39 +65,101 @@ func (s *Sled) Open(filepath string) error {
 	wg := sync.WaitGroup{}
 	s.close_wg = &wg
 
-	if err != nil {
-		return SledError(err.Error())
-	}
+	go storage_thread(s.st, s.file_ch, db_ch, s.err_ch)
+	go db_thread(s.db, db_ch, s.err_ch)
 
 	s.createBuckets()
 	s.loadAllKeys()
 	return nil
 }
 
+func storage_thread(st storage.IO, tx_in <-chan Tx, out chan<- Tx, ech chan<- error) {
+	for t := range tx_in {
+		var err error
+		var id *asset.ID
+		key := t.Key()
+		value := t.Value()
+		action := t.Action()
+
+		switch action {
+		case "save":
+			id, err = st.Save(value)
+			if err != nil {
+				ech <- err
+				break
+			}
+			out <- &tx{"save", key, id}
+		case "delete":
+			out <- &tx{"delete", key, nil}
+			// don't delete files yet.
+		}
+	}
+	close(out)
+}
+
+func db_thread(db *bolt.DB, tx_in <-chan Tx, ech chan<- error) {
+	for t := range tx_in {
+		var err error
+		var id []byte
+		key := []byte(t.Key())
+		value := t.Value()
+		action := t.Action()
+
+		switch value.(type) {
+		case nil:
+			// do nothing
+		case *asset.ID:
+			id = value.(*asset.ID).RawBytes()
+		default:
+			if action == "save" {
+				ech <- SledError("DB received non ID value.")
+			}
+			continue
+		}
+
+		switch action {
+		case "save":
+			err = db.Batch(func(btx *bolt.Tx) error {
+				b := btx.Bucket([]byte("assets"))
+				return b.Put(key, id)
+			})
+		case "delete":
+			err = db.Batch(func(btx *bolt.Tx) error {
+				b := btx.Bucket([]byte("assets"))
+				return b.Delete(key)
+			})
+		}
+
+		if err != nil {
+			ech <- SledError(err.Error())
+		}
+	}
+	close(ech)
+}
+
+func storage_thread_noop(st storage.IO, tx_in <-chan Tx, out chan<- Tx, ech chan<- error) {
+	for range tx_in {
+		out <- &tx{"", "", nil}
+		// noop
+	}
+	close(out)
+}
+
+func db_thread_noop(db *bolt.DB, tx_in <-chan Tx, ech chan<- error) {
+	for range tx_in {
+		// noop
+	}
+	close(ech)
+}
+
 // Wait for database operations to complete, and close database.
 func (s *Sled) Close() error {
+	close(s.file_ch)
 	s.Wait()
-	err := s.db.Batch(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("assets"))
-		for ele := range s.ct.Iterator(nil) {
-			p := b.Get(ele.Key)
-			if p == nil {
-				id, err := s.st.Save(ele.Value)
-				if err != nil {
-					return err
-				}
-				err = b.Put(ele.Key, id.RawBytes())
-				if err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	err = s.db.Close()
+
+	<-s.err_ch
+
+	err := s.db.Close()
 	s.db = nil
 	return err
 }
@@ -84,16 +173,10 @@ func (s *Sled) Wait() {
 
 func (s *Sled) loadAllKeys() {
 	s.loading = make(chan struct{})
-	// s.close_wg.Add(1)
-	// go func() {
-	// defer s.close_wg.Done()
 	for ele := range s.db_iterator("assets", nil, nil) {
 		p := sledPointer{ele.Id()}
-		// s.ct.Insert(ele.Key(), ele.Id())
 		s.ct.Insert(ele.Key(), &p)
 	}
-	// close(s.loading)
-	// }()
 }
 
 type element struct {
@@ -165,17 +248,6 @@ func (s *Sled) createBuckets() error {
 	})
 }
 
-// put sets the value of a key for a given bucket
-func (s *Sled) put_db(bucket string, key string, id *asset.ID) error {
-	if id == nil {
-		return errors.New("Id is nil")
-	}
-	return s.db.Batch(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		return b.Put([]byte(key), id.RawBytes())
-	})
-}
-
 // get retrieves the value for a key for a given bucket
 func (s *Sled) get_db(bucket string, key string) (id *asset.ID, err error) {
 	var data []byte
@@ -192,16 +264,4 @@ func (s *Sled) get_db(bucket string, key string) (id *asset.ID, err error) {
 		return nil
 	})
 	return
-}
-
-func (s *Sled) delete_db(bucket string, key string) error {
-	err := s.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket))
-		err := b.Delete([]byte(key))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	return err
 }

@@ -87,7 +87,8 @@ func TestLateOpen(t *testing.T) {
 	t.Log("do")
 	sl := sled.New(cfg)
 	is.NotNil(sl)
-	sl.Open(dir + "/sled.db")
+	db_str := dir + "/sled.db"
+	sl.Open(&db_str)
 	sl.Close()
 
 	t.Log("check")

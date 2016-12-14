@@ -25,6 +25,7 @@ func TestDBOpen(t *testing.T) {
 	is.NotNil(sl)
 
 	t.Log("check")
-	err = sl.Open("db2.sled")
+	db_str := "db2.sled"
+	err = sl.Open(&db_str)
 	is.Equal(err.Error(), "Sled error: Db already open.")
 }
