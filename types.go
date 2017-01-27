@@ -40,7 +40,7 @@ func (e *ele) Value() interface{} {
 
 // Sled holds pointers to the configuration, database, and the ctrie
 // data structure.  It has no exported data structures.
-type mem_sled struct {
+type sled struct {
 	// cfg               *config.Config
 	ct *ctrie.Ctrie
 }

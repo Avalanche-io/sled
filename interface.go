@@ -15,8 +15,7 @@ type CRUD interface {
 	Delete(string) (interface{}, bool)
 }
 
-type OpenCloser interface {
-	Open(*string) error
+type Closer interface {
 	Close() error
 }
 
@@ -25,9 +24,9 @@ type Snapshoter interface {
 }
 
 // KV is a generalized interface to any key/value store
-type KV interface {
+type Sled interface {
 	CRUD
 	Iterater
-	OpenCloser
+	Closer
 	Snapshoter
 }
