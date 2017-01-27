@@ -106,6 +106,27 @@ func TestNewGetSet(t *testing.T) {
 	}
 }
 
+func TestInvalidTypeError(t *testing.T) {
+	t.Log("init")
+	is := is.New(t)
+	sl := sled.New()
+
+	t.Log("do")
+	err := sl.Set("foo", "bar")
+	is.NoErr(err)
+
+	var not_ptr string
+	err = sl.Get("foo", not_ptr)
+	is.Err(err)
+	is.Equal(err.Error(), "argument must be a pointer")
+
+	var Nil *string
+	err = sl.Get("foo", Nil)
+	is.Err(err)
+	is.Equal(err.Error(), "argument is nil")
+
+}
+
 func strptr(value string) *string {
 	return &value
 }
@@ -129,18 +150,37 @@ func TestIterate(t *testing.T) {
 	sl := sled.New()
 	keys := []string{"foo", "bar", "baz"}
 	values := []string{"value 1", "value 2", "value 3"}
+
 	t.Log("do")
 	for i := 0; i < len(keys); i++ {
 		sl.Set(keys[i], values[i])
 	}
 
 	t.Log("check")
+	cnt := 0
 	for elem := range sl.Iterate(nil) {
 		i := indexOf(keys, elem.Key())
 		is.NotEqual(i, -1)
 		is.Equal(elem.Value(), values[i])
 		elem.Close()
+		cnt++
 	}
+	is.Equal(cnt, 3)
+	// cancel
+	cancel := make(chan struct{})
+	cnt = 0
+	for elem := range sl.Iterate(cancel) {
+		if cnt == 1 {
+			close(cancel)
+		}
+		is.True(cnt < 2)
+		i := indexOf(keys, elem.Key())
+		is.NotEqual(i, -1)
+		is.Equal(elem.Value(), values[i])
+		elem.Close()
+		cnt++
+	}
+	is.Equal(cnt, 2)
 }
 
 func TestSetIfNil(t *testing.T) {

@@ -2,7 +2,6 @@ package sled
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 	"sync"
 
@@ -38,8 +37,10 @@ func (s *mem_sled) Get(key string, v interface{}) error {
 		return errors.New("key does not exist")
 	}
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
-		return errors.New(fmt.Sprintf("invalid type error %s", reflect.TypeOf(v)))
+	if rv.Kind() != reflect.Ptr {
+		return errors.New("argument must be a pointer")
+	} else if rv.IsNil() {
+		return errors.New("argument is nil")
 	}
 	rv.Elem().Set(reflect.ValueOf(val))
 	return nil
@@ -67,14 +68,13 @@ var elePool = sync.Pool{
 // Iterator returns the key value pair for each key in the sled.
 // It takes an optional cancel channel which can be closed to stop iterating.
 // The key and value are returned in an 'Element' interface.
-// For performance reasons, the caller must call Close() after using
-// the Element returned by Iterate
+// For performance reasons, the caller must call Close() on
+// the Element returned.
 func (s *mem_sled) Iterate(cancel <-chan struct{}) <-chan Element {
 	out := make(chan Element)
-	c := make(chan struct{})
 	go func() {
 		defer close(out)
-		for e := range s.ct.Iterator(c) {
+		for e := range s.ct.Iterator(cancel) {
 			entry := elePool.Get().(*ele)
 			entry.k = string(e.Key)
 			entry.v = e.Value
@@ -84,7 +84,7 @@ func (s *mem_sled) Iterate(cancel <-chan struct{}) <-chan Element {
 			select {
 			case out <- entry:
 			case <-cancel:
-				close(c)
+				return
 			}
 		}
 
