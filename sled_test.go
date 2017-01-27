@@ -104,6 +104,8 @@ func TestNewGetSet(t *testing.T) {
 			is.Equal(output, tt.Value)
 		}
 	}
+	err := sl.Close()
+	is.NoErr(err)
 }
 
 func TestInvalidTypeError(t *testing.T) {
@@ -124,7 +126,8 @@ func TestInvalidTypeError(t *testing.T) {
 	err = sl.Get("foo", Nil)
 	is.Err(err)
 	is.Equal(err.Error(), "argument is nil")
-
+	err = sl.Close()
+	is.NoErr(err)
 }
 
 func strptr(value string) *string {
@@ -181,6 +184,8 @@ func TestIterate(t *testing.T) {
 		cnt++
 	}
 	is.Equal(cnt, 2)
+	err := sl.Close()
+	is.NoErr(err)
 }
 
 func TestSetIfNil(t *testing.T) {
@@ -194,6 +199,8 @@ func TestSetIfNil(t *testing.T) {
 	t.Log("check")
 	is.False(sl.SetIfNil("foo", "bar"))
 	is.True(sl.SetIfNil("baz", "bat"))
+	err := sl.Close()
+	is.NoErr(err)
 }
 
 func TestDelete(t *testing.T) {
@@ -216,6 +223,8 @@ func TestDelete(t *testing.T) {
 	err := sl.Get("foo", nil_value)
 	is.Nil(nil_value)
 	is.Equal(err.Error(), "key does not exist")
+	err = sl.Close()
+	is.NoErr(err)
 }
 
 func TestSnapshot(t *testing.T) {
@@ -240,4 +249,6 @@ func TestSnapshot(t *testing.T) {
 	err = snap.Get("bat", nil_value)
 	is.Err(err)
 	is.Nil(nil_value)
+	err = sl.Close()
+	is.NoErr(err)
 }
