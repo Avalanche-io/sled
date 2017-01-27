@@ -12,11 +12,9 @@ Sled is a very high performance thread safe Key/Value store based on a [ctrie][1
 
 ## Motivation
 
-Sled is more than twice as fast as a go `map` in a multi-threaded context (given enough threads).  
+Sled is more than twice as fast as a go `map` when multi-threaded.
 
-Sled is thread safe, and non-blocking.
-
-Go's built in `map` is not thread safe, so you have to protect access with mutex locks. 
+Sled is thread safe, and non-blocking, while Go's built in `map` is not thread safe, so it must be protected with blocking thread synchronization (i.e. mutex lock, channel, etc.)
 
 ## Features
 
@@ -24,12 +22,18 @@ Go's built in `map` is not thread safe, so you have to protect access with mutex
 - Non-blocking
 - Zero cost Snapshots
 - Iterator
-- Optional concurrent save / load from database
-- Optional Read-Through caching
+- [TODO] Optional concurrent save / load from database
+- [TODO] Optional Read-Through caching
+
+## CLI Example App
+
+`sled key [value] [key value ...]`
+
+Sled will save data in a `sled.db` file, in the local directory.  
+
+To set keys simply provide pairs of arguments. `sled` interprets each pair of arguments as `key value`.  Providing a single argument will cause `sled` to return the value (if any) for that key.  
 
 ## Benchmarks
-
-#### Set
 
 ```
 BenchmarkMapSet-24                   1000000          1021 ns/op
@@ -43,8 +47,6 @@ BenchmarkSledSetGetParallel-24       2000000           683 ns/op
 ```
 
 Sled is slower than map on a small number of threads, but becomes much faster then map as the number of threads increase up to the hyperthread limit of the system.  Future work will improve the Sled's performance for lower thread counts.
-
-More to come: Versions, TTL (time to live), performance improvements, and benchmarks.
 
 ## Example Usage
 
