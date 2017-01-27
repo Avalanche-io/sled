@@ -46,7 +46,7 @@ BenchmarkSledSetParallel-24          3000000           566 ns/op
 BenchmarkSledSetGetParallel-24       2000000           683 ns/op
 ```
 
-Sled is slower than map on a small number of threads, but becomes much faster then map as the number of threads increase up to the hyperthread limit of the system.  Future work will improve the Sled's performance for lower thread counts.
+Sled is slower than map on a small number of threads, but becomes much faster then map as the number of threads increase up to the hyperthread limit of the system.  Future work will improve Sled's performance for lower thread counts.
 
 ## Example Usage
 
