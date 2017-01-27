@@ -6,46 +6,68 @@
 [![Build Status](https://travis-ci.org/Avalanche-io/sled.svg?branch=master)](https://travis-ci.org/Avalanche-io/sled)
 [![Coverage Status](https://coveralls.io/repos/github/Avalanche-io/sled/badge.svg?branch=master)](https://coveralls.io/github/Avalanche-io/sled?branch=master)
 
+Sled is a very high performance thread safe Key/Value store based on a [ctrie][1] data structure.
 
-Sled is a very high performance thread safe Key/Value store based on a _ctrie_ data structure with automatic persistence to disk via non-blocking snapshots.
+[1]: https://axel22.github.io/resources/docs/ctries-snapshot.pdf
+
+## Motivation
+
+Sled is more than twice as fast as a go `map` in a multi-threaded context (given enough threads).  
+
+Sled is thread safe, and non-blocking.
+
+Go's built in `map` is not thread safe, so you have to protect access with mutex locks. 
 
 ## Features
 
-- Multi-thread safe
+- Thread safe
 - Non-blocking
-- Optional database storage
-- Optional event notifications
+- Zero cost Snapshots
+- Iterator
+- Optional concurrent save / load from database
+- Optional Read-Through caching
+
+## Benchmarks
+
+#### Set
+
+```
+BenchmarkMapSet-24                   1000000          1021 ns/op
+BenchmarkMapSetGet-24                1000000          1401 ns/op
+BenchmarkMapSetParallel-24           1000000          1335 ns/op
+BenchmarkMapSetGetParallel-24        1000000          1527 ns/op
+BenchmarkSledSet-24                  1000000          1522 ns/op
+BenchmarkSledSetGet-24               1000000          2528 ns/op
+BenchmarkSledSetParallel-24          3000000           566 ns/op
+BenchmarkSledSetGetParallel-24       2000000           683 ns/op
+```
+
+Sled is slower than map on a small number of threads, but becomes much faster then map as the number of threads increase up to the hyperthread limit of the system.  Future work will improve the Sled's performance for lower thread counts.
 
 More to come: Versions, TTL (time to live), performance improvements, and benchmarks.
 
 ## Example Usage
 
 ```go
-import(
+package main
+
+import (
     "fmt"
 
     "github.com/Avalanche-io/sled"
-    "github.com/Avalanche-io/sled/config"
 )
 
 func main() {
-    // Add database storage to the configuration,
-    // in the default location ($HOME/.sled/sled.db)
-    cfg := config.New().WithDB("sled.db")
-    sl := sled.New(cfg)
-    defer sl.Close()
+    sl := sled.New()
 
-    key := "forty two"
+    key := "The meaning of life"
     sl.Set(key, 42)
-
-    v, err := sl.Get("forty two")
-
+    
+    var v int
+    err := sl.Get(key, &v)
     if err != nil {
         panic(err)
     }
-
-    fmt.Printf("key: %s, \tvalue: %v, \ttype: %T\n", key, v, v)
-
+    fmt.Printf("key: %s, \tvalue: %v\n", key, v)
 }
-
 ```

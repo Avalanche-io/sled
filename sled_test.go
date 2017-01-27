@@ -1,238 +1,203 @@
 package sled_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"math/rand"
-	"os"
-	"strconv"
 	"testing"
 
 	"github.com/cheekybits/is"
 
 	"github.com/Avalanche-io/sled"
-	"github.com/Avalanche-io/sled/config"
-
-	"github.com/etcenter/c4/asset"
 )
 
-func TestConfiguration(t *testing.T) {
+func TestNewGetSet(t *testing.T) {
 	t.Log("init")
 	is := is.New(t)
+	sl := sled.New()
+	type TestStruct struct {
+		Foo string
+	}
 
-	t.Log("do")
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestConfiguration_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir).WithDB("db.sled")
-	sl := sled.New(cfg)
+	tests := []struct {
+		Key   string
+		Value interface{}
+	}{
+		{
+			Key:   "foo",
+			Value: "bar",
+		},
+		{
+			Key:   "bar",
+			Value: 12,
+		},
+		{
+			Key:   "baz",
+			Value: TestStruct{"bat"},
+		},
+		{
+			Key:   "foo2",
+			Value: strptr("bar"),
+		},
+		{
+			Key:   "bar2",
+			Value: intptr(12),
+		},
+		{
+			Key:   "baz2",
+			Value: &TestStruct{"bat"},
+		},
+		{
+			Key: "bat",
+			Value: struct {
+				Question string
+				Answer   int
+			}{
+				Question: "What is the meaning of life, the universe, everything?",
+				Answer:   42,
+			},
+		},
+	}
 
 	t.Log("check")
-	is.NotNil(cfg)
-	is.NotNil(sl)
-
-	if _, err := os.Stat(dir + "/db.sled"); os.IsNotExist(err) {
-		is.Fail("Db file not created")
+	for _, tt := range tests {
+		switch v := tt.Value.(type) {
+		// case string:
+		// 	sl.Set(tt.Key, v)
+		// case int:
+		// 	sl.Set(tt.Key, v)
+		default:
+			sl.Set(tt.Key, v)
+		}
+		switch tt.Value.(type) {
+		case string:
+			var output string
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		case int:
+			var output int
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		case *string:
+			var output *string
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		case *int:
+			var output *int
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		case TestStruct:
+			var output TestStruct
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		case *TestStruct:
+			var output *TestStruct
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		default:
+			var output interface{}
+			err := sl.Get(tt.Key, &output)
+			is.NoErr(err)
+			is.Equal(output, tt.Value)
+		}
 	}
 }
 
-func TestReadWrite(t *testing.T) {
+func strptr(value string) *string {
+	return &value
+}
+
+func intptr(value int) *int {
+	return &value
+}
+
+func indexOf(list []string, key string) int {
+	for i, k := range list {
+		if k == key {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestIterate(t *testing.T) {
 	t.Log("init")
 	is := is.New(t)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestReadWrite_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir).WithDB("sled.db")
+	sl := sled.New()
+	keys := []string{"foo", "bar", "baz"}
+	values := []string{"value 1", "value 2", "value 3"}
+	t.Log("do")
+	for i := 0; i < len(keys); i++ {
+		sl.Set(keys[i], values[i])
+	}
+
+	t.Log("check")
+	for elem := range sl.Iterate(nil) {
+		i := indexOf(keys, elem.Key())
+		is.NotEqual(i, -1)
+		is.Equal(elem.Value(), values[i])
+		elem.Close()
+	}
+}
+
+func TestSetIfNil(t *testing.T) {
+	t.Log("init")
+	is := is.New(t)
+	sl := sled.New()
 
 	t.Log("do")
-	sl := sled.New(cfg)
 	sl.Set("foo", "bar")
-	value, err := sl.Get("foo")
 
 	t.Log("check")
-	is.NoErr(err)
-	is.Equal(value.(string), "bar")
-}
-
-func TestCreatesDBfile(t *testing.T) {
-	t.Log("init")
-	is := is.New(t)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestCreatesDBfile_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir).WithDB("sled.db")
-
-	t.Log("do")
-	sl := sled.New(cfg)
-	is.NotNil(sl)
-	sl.Close()
-
-	t.Log("check")
-	if _, err = os.Stat(dir + "/sled.db"); os.IsNotExist(err) {
-		is.Fail("DB not created " + dir + "/sled.db")
-	}
-}
-
-// TODO: update test for new db path semantics.
-func TestLateOpen(t *testing.T) {
-	t.Log("init")
-	is := is.New(t)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestLateOpen_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir)
-
-	t.Log("do")
-	sl := sled.New(cfg)
-	is.NotNil(sl)
-	db_str := dir + "/sled.db"
-	sl.Open(&db_str)
-	sl.Close()
-
-	t.Log("check")
-	if _, err = os.Stat(dir + "/sled.db"); os.IsNotExist(err) {
-		is.Fail("DB not created " + dir + "/sled.db")
-	}
-}
-
-func TestPersistance(t *testing.T) {
-	t.Log("init")
-	is := is.New(t)
-	b := make([]byte, 1024)
-	n, err := rand.Read(b)
-	is.NoErr(err)
-	is.Equal(n, len(b))
-	id, err := asset.Identify(bytes.NewReader(b))
-	is.NoErr(err)
-	t.Logf("data id: %s", id)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestPersistance_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-
-	t.Log("do")
-	t.Log(dir)
-	cfg := config.New().WithRoot(dir).WithDB("sled.db")
-
-	// #1
-	sl := sled.New(cfg)
-	is.NoErr(err)
-	sl.Set("foo", "bar")
-
-	sl.Set("bat", b)
-	foo, err := sl.Get("foo")
-	is.NoErr(err)
-	bat, err := sl.Get("bat")
-	is.NoErr(err)
-	sl.Close()
-
-	// #2
-	sl2 := sled.New(cfg)
-	defer sl2.Close()
-	foo2, err := sl2.Get("foo")
-	is.NoErr(err)
-	bat2, err := sl2.Get("bat")
-	is.NoErr(err)
-
-	t.Log("check")
-	is.Equal(foo.(string), "bar")
-	is.Equal(bat.([]byte), b)
-	is.Equal(foo2.(string), "bar")
-	is.Equal(bat2.([]byte), b)
-}
-
-func TestIterator(t *testing.T) {
-	t.Log("init")
-	is := is.New(t)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestIterator_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir).WithDB("db.sled")
-	sl := sled.New(cfg)
-	key_list := map[string]int{}
-	rounds := 5
-	i := 0
-
-	t.Log("do")
-	for i = 0; i < rounds; i++ {
-		key := fmt.Sprintf("%08d", i)
-		key_list[key] = i
-		b, err := json.Marshal(i)
-		is.NoErr(err)
-		sl.Set(key, string(b))
-		t.Log("key: ", key, ", b: ", string(b))
-	}
-
-	t.Log("check")
-	for ele := range sl.Iterator(nil) {
-		num, err := strconv.Atoi(ele.Value().(string))
-		is.NoErr(err)
-		t.Log("ele.Key: ", ele.Key(), ", ele.Value: ", num)
-		is.Equal(key_list[ele.Key()], num)
-	}
+	is.False(sl.SetIfNil("foo", "bar"))
+	is.True(sl.SetIfNil("baz", "bat"))
 }
 
 func TestDelete(t *testing.T) {
 	t.Log("init")
 	is := is.New(t)
-	b := make([]byte, 1024)
-	_, err := rand.Read(b)
-	is.NoErr(err)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestDelete_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir).WithDB("db.sled")
-	sl := sled.New(cfg)
+	sl := sled.New()
 
 	t.Log("do")
-	err = sl.Set("foo", "bar")
-	is.NoErr(err)
-	v, existed := sl.Delete("foo")
-	is.True(existed)
-	is.Equal(v.(string), "bar")
-	err = sl.Set("baz", b)
-	v, existed = sl.Delete("baz")
-	is.True(existed)
-	is.Equal(v.([]byte), b)
+	sl.Set("foo", "bar")
+	baz, baz_not_ok := sl.Delete("baz")
+	foo, foo_ok := sl.Delete("foo")
 
 	t.Log("check")
-
-	for ele := range sl.Iterator(nil) {
-		is.Fail("There should be no elements in the sled. " + ele.Key())
-	}
+	is.OK(!baz_not_ok)
+	is.Nil(baz)
+	is.OK(foo_ok)
+	is.NotNil(foo)
+	is.Equal(foo.(string), "bar")
+	var nil_value interface{}
+	err := sl.Get("foo", nil_value)
+	is.Nil(nil_value)
+	is.Equal(err.Error(), "key does not exist")
 }
 
-func TestPersistantDelete(t *testing.T) {
+func TestSnapshot(t *testing.T) {
 	t.Log("init")
 	is := is.New(t)
-	b := make([]byte, 1024)
-	_, err := rand.Read(b)
-	is.NoErr(err)
-	dir, err := ioutil.TempDir("/tmp", "sledTest_TestDelete_")
-	is.NoErr(err)
-	defer os.RemoveAll(dir)
-	cfg := config.New().WithRoot(dir).WithDB("db.sled")
-	sl := sled.New(cfg)
+	sl := sled.New()
 
 	t.Log("do")
-	err = sl.Set("foo", "bar")
-	is.NoErr(err)
-	v, existed := sl.Delete("foo")
-	is.True(existed)
-	is.Equal(v.(string), "bar")
-	err = sl.Set("baz", b)
-	v, existed = sl.Delete("baz")
-	is.True(existed)
-	is.Equal(v.([]byte), b)
-	sl.Close()
-	// #2
-	sl2 := sled.New(cfg)
-	defer sl2.Close()
+	sl.Set("foo", "bar")
+	snap := sl.Snapshot()
+	sl.Set("bat", "baz")
 
 	t.Log("check")
+	// snap should have "foo"
+	var bar_value string
+	err := snap.Get("foo", &bar_value)
+	is.NoErr(err)
+	is.Equal(bar_value, "bar")
 
-	for ele := range sl2.Iterator(nil) {
-		is.Fail("There should be no elements in the sled. " + ele.Key())
-	}
+	// but not have "bat"
+	var nil_value interface{}
+	err = snap.Get("bat", nil_value)
+	is.Err(err)
+	is.Nil(nil_value)
 }
