@@ -77,7 +77,7 @@ func BenchmarkSledSetGet(b *testing.B) {
 	}
 	var v int
 	for n := 0; n < b.N; n++ {
-		_ = sl.Get(strconv.Itoa(n), v)
+		_ = sl.Get(strconv.Itoa(n), &v)
 		if v != n {
 			b.Fail()
 		}
@@ -103,7 +103,7 @@ func BenchmarkSledSetGetParallel(b *testing.B) {
 		for pb.Next() {
 			sl.Set(strconv.Itoa(n), n)
 
-			_ = sl.Get(strconv.Itoa(n), v)
+			_ = sl.Get(strconv.Itoa(n), &v)
 			if v != n {
 				b.Fail()
 			}
