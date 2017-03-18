@@ -4,13 +4,11 @@ import (
 	"errors"
 	"reflect"
 	"sync"
-
-	"github.com/Workiva/go-datastructures/trie/ctrie"
 )
 
 // Create a new Sled object with optional custom configuration.
 func New() Sled {
-	ct := ctrie.New(nil)
+	ct := newCtrie(nil)
 	return &sled{ct}
 }
 
@@ -60,8 +58,8 @@ func (s *sled) Close() error {
 
 // Snapshot returns a single point in time image of the Sled.
 // Snapshot is fast and non blocking.
-func (s *sled) Snapshot() CRUD {
-	return &sled{s.ct.Snapshot()}
+func (s *sled) Snapshot(mode IoMode) CRUD {
+	return &sled{s.ct.Snapshot(mode)}
 }
 
 var elePool = sync.Pool{
@@ -79,7 +77,7 @@ func (s *sled) Iterate(cancel <-chan struct{}) <-chan Element {
 	out := make(chan Element)
 	go func() {
 		defer close(out)
-		for e := range s.ct.Iterator(cancel) {
+		for e := range s.ct.Iterate(cancel) {
 			entry := elePool.Get().(*ele)
 			entry.k = string(e.Key)
 			entry.v = e.Value

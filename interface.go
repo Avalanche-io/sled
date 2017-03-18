@@ -20,7 +20,7 @@ type Closer interface {
 }
 
 type Snapshoter interface {
-	Snapshot() CRUD
+	Snapshot(IoMode) CRUD
 }
 
 // KV is a generalized interface to any key/value store

@@ -9,7 +9,6 @@ import (
 )
 
 func TestNewGetSet(t *testing.T) {
-	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 	type TestStruct struct {
@@ -56,7 +55,6 @@ func TestNewGetSet(t *testing.T) {
 		},
 	}
 
-	t.Log("check")
 	for _, tt := range tests {
 		switch v := tt.Value.(type) {
 		// case string:
@@ -109,11 +107,9 @@ func TestNewGetSet(t *testing.T) {
 }
 
 func TestInvalidTypeError(t *testing.T) {
-	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 
-	t.Log("do")
 	err := sl.Set("foo", "bar")
 	is.NoErr(err)
 
@@ -148,18 +144,15 @@ func indexOf(list []string, key string) int {
 }
 
 func TestIterate(t *testing.T) {
-	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 	keys := []string{"foo", "bar", "baz"}
 	values := []string{"value 1", "value 2", "value 3"}
 
-	t.Log("do")
 	for i := 0; i < len(keys); i++ {
 		sl.Set(keys[i], values[i])
 	}
 
-	t.Log("check")
 	cnt := 0
 	for elem := range sl.Iterate(nil) {
 		i := indexOf(keys, elem.Key())
@@ -189,14 +182,11 @@ func TestIterate(t *testing.T) {
 }
 
 func TestSetIfNil(t *testing.T) {
-	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 
-	t.Log("do")
 	sl.Set("foo", "bar")
 
-	t.Log("check")
 	is.False(sl.SetIfNil("foo", "bar"))
 	is.True(sl.SetIfNil("baz", "bat"))
 	err := sl.Close()
@@ -204,16 +194,13 @@ func TestSetIfNil(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
-	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 
-	t.Log("do")
 	sl.Set("foo", "bar")
 	baz, baz_not_ok := sl.Delete("baz")
 	foo, foo_ok := sl.Delete("foo")
 
-	t.Log("check")
 	is.OK(!baz_not_ok)
 	is.Nil(baz)
 	is.OK(foo_ok)
@@ -228,16 +215,13 @@ func TestDelete(t *testing.T) {
 }
 
 func TestSnapshot(t *testing.T) {
-	t.Log("init")
 	is := is.New(t)
 	sl := sled.New()
 
-	t.Log("do")
 	sl.Set("foo", "bar")
 	snap := sl.Snapshot()
 	sl.Set("bat", "baz")
 
-	t.Log("check")
 	// snap should have "foo"
 	var bar_value string
 	err := snap.Get("foo", &bar_value)

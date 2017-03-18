@@ -1,17 +1,18 @@
 package sled
 
-import (
-	"github.com/Workiva/go-datastructures/trie/ctrie"
-
-	"github.com/etcenter/c4/asset"
-)
-
 // A key/value pair interface, for use in range operations and signals.
 type Element interface {
 	Key() string
 	Value() interface{}
 	Close()
 }
+
+type IoMode uint
+
+const (
+	ReadOnly IoMode = iota
+	ReadWrite
+)
 
 type Tx interface {
 	Element
@@ -42,12 +43,5 @@ func (e *ele) Value() interface{} {
 // data structure.  It has no exported data structures.
 type sled struct {
 	// cfg               *config.Config
-	ct *ctrie.Ctrie
-}
-
-// A sled pointer is used to dereference values in the sled.
-// This happens when the data is large, or not yet loaded.
-//
-type sledPointer struct {
-	Id *asset.ID
+	ct *ctrie
 }
