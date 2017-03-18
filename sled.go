@@ -12,6 +12,30 @@ func New() Sled {
 	return &sled{ct}
 }
 
+type sled struct {
+	ct *ctrie
+}
+
+type ele struct {
+	k string
+	v interface{}
+	c func()
+}
+
+func (e *ele) Close() {
+	if e.c != nil {
+		e.c()
+	}
+}
+
+func (e *ele) Key() string {
+	return e.k
+}
+
+func (e *ele) Value() interface{} {
+	return e.v
+}
+
 // Assigns value to key, replacing any previous values.
 func (s *sled) Set(key string, value interface{}) error {
 	s.ct.Insert([]byte(key), value)
@@ -58,7 +82,7 @@ func (s *sled) Close() error {
 
 // Snapshot returns a single point in time image of the Sled.
 // Snapshot is fast and non blocking.
-func (s *sled) Snapshot(mode IoMode) CRUD {
+func (s *sled) Snapshot(mode IoMode) Sled {
 	return &sled{s.ct.Snapshot(mode)}
 }
 
