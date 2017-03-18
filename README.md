@@ -1,54 +1,79 @@
 # Sled 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![GoDoc](https://godoc.org/github.com/Avalanche-io/sled?status.svg)](https://godoc.org/github.com/Avalanche-io/sled)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Avalanche-io/sled)](https://goreportcard.com/report/github.com/Avalanche-io/sled)
-[![Stories in Ready](https://badge.waffle.io/Avalanche-io/sled.png?label=ready&title=Ready)](https://waffle.io/Avalanche-io/sled)
-[![Build Status](https://travis-ci.org/Avalanche-io/sled.svg?branch=master)](https://travis-ci.org/Avalanche-io/sled)
-[![Coverage Status](https://coveralls.io/repos/github/Avalanche-io/sled/badge.svg?branch=master)](https://coveralls.io/github/Avalanche-io/sled?branch=master)
+[![Build Status](https://travis-ci.org/Avalanche-io/sled.svg)](https://travis-ci.org/Avalanche-io/sled)
+[![Coverage Status](https://coveralls.io/repos/github/Avalanche-io/sled/badge.svg)](https://coveralls.io/github/Avalanche-io/sled)
 
-Sled is a very high performance thread safe Key/Value store based on a [ctrie][1] data structure.
+Sled is a high performance Key/Value store based on a [ctrie][1] data structure.  Sled is non-blocking and thread safe, meaning it is safe to access from any number of threads simultaneously.
 
-[1]: https://axel22.github.io/resources/docs/ctries-snapshot.pdf
+Any type of data can be stored in a key, but sled maintains the benefits of the Go type system by enforcing the type. Values must be accessed by passing an empty type value of the same type into the Get method.
 
-## Motivation
+[1]: ctries_paper.pdf
 
-Sled is more than twice as fast as a go `map` when multi-threaded.
+## Usage
 
-Sled is thread safe, and non-blocking, while Go's built in `map` is not thread safe, so it must be protected with blocking thread synchronization (i.e. mutex lock, channel, etc.)
+`go get "github.com/Avalanche-io/sled"`
 
-## Features
+Create a sled with sled.New().
 
-- Thread safe
-- Non-blocking
-- Zero cost Snapshots
-- Iterator
-- [TODO] Optional concurrent save / load from database
-- [TODO] Optional Read-Through caching
+`sl := sled.New()`
 
-## CLI Example App
+Setting a key. Sled accepts any type.
 
-`sled key [value] [key value ...]`
-
-Sled will save data in a `sled.db` file, in the local directory.  
-
-To set keys simply provide pairs of arguments. `sled` interprets each pair of arguments as `key value`.  Providing a single argument will cause `sled` to return the value (if any) for that key.  
-
-## Benchmarks
-
-```
-BenchmarkMapSet-24                   1000000          1021 ns/op
-BenchmarkMapSetGet-24                1000000          1401 ns/op
-BenchmarkMapSetParallel-24           1000000          1335 ns/op
-BenchmarkMapSetGetParallel-24        1000000          1527 ns/op
-BenchmarkSledSet-24                  1000000          1522 ns/op
-BenchmarkSledSetGet-24               1000000          2528 ns/op
-BenchmarkSledSetParallel-24          3000000           566 ns/op
-BenchmarkSledSetGetParallel-24       2000000           683 ns/op
+```go
+sl.Set("key", "value")
+sl.Set("Answer to the Ultimate Question", 42)
+sl.Set("primes", []int{2, 3, 5, 7, 11, 13, 17, 19, 23, 29})
 ```
 
-Sled is slower than map on a small number of threads, but becomes much faster then map as the number of threads increase up to the hyperthread limit of the system.  Future work will improve Sled's performance for lower thread counts.
+Getting a value. 
 
-## Example Usage
+```go
+var primes []int
+var ultimate_answer int
+var right_value_type string
+var wrong_value_type []byte
+
+err := sl.Get("Answer to the Ultimate Question", &ultimate_answer)
+fmt.Printf("Answer to the Ultimate Question: %d, err: %t\n", ultimate_answer, err != nil)
+err = sl.Get("primes", &primes)
+fmt.Printf("Primes: %v, err: %t\n", primes, err != nil)
+err = sl.Get("key", &wrong_value_type)
+fmt.Printf("key: %v, err: %t\n", right_value_type, err != nil)
+fmt.Printf("key (wrong type): %v, err: %s\n", wrong_value_type, err)
+err = sl.Get("key", &right_value_type)
+```
+
+Conditional setting of a key.  SetIfNil will only assign the value if the key is not already set.
+
+`SetIfNil(string, interface{}) bool`
+
+Dealt a key.
+
+`Delete(string) (interface{}, bool)`
+
+Close, when done with a sled close it, to free resources.
+
+`Close() error`
+
+Iterating over all keys, can be done with range expression.
+
+```go
+stop := chan struct{} // or nil if interruption isn't needed.
+for elm := range sl.Iterate(stop) {
+    fmt.Printf("key: %s  value: %v\n", elm.Key(), elm.Value())
+    elm.Close() // close the Element when done 
+}
+```
+
+A Snapshot is a nearly zero cost copy of a sled that will not be effected by future changes to the source sled. It can be made mutable or immutable by setting the argument to either `sled.ReadWrite`, or `sled.ReadOnly`.
+
+```go
+sl_mutable := sl.Snapshot(sled.ReadWrite)
+sl_immutable := sl.Snapshot(sled.ReadOnly)
+```
+
+## Example
 
 ```go
 package main

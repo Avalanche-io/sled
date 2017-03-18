@@ -219,7 +219,7 @@ func TestSnapshot(t *testing.T) {
 	sl := sled.New()
 
 	sl.Set("foo", "bar")
-	snap := sl.Snapshot()
+	snap := sl.Snapshot(sled.ReadWrite)
 	sl.Set("bat", "baz")
 
 	// snap should have "foo"

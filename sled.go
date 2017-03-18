@@ -64,6 +64,9 @@ func (s *sled) Get(key string, v interface{}) error {
 	} else if rv.IsNil() {
 		return errors.New("argument is nil")
 	}
+	if rv.Elem().Type() != reflect.TypeOf(val) {
+		return ErrGetType{rv.Elem().Type().String(), reflect.TypeOf(val).String()}
+	}
 	rv.Elem().Set(reflect.ValueOf(val))
 	return nil
 }
