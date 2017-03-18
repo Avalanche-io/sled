@@ -43,16 +43,6 @@ func TestNewGetSet(t *testing.T) {
 			Key:   "baz2",
 			Value: &TestStruct{"bat"},
 		},
-		{
-			Key: "bat",
-			Value: struct {
-				Question string
-				Answer   int
-			}{
-				Question: "What is the meaning of life, the universe, everything?",
-				Answer:   42,
-			},
-		},
 	}
 
 	for _, tt := range tests {
@@ -92,11 +82,6 @@ func TestNewGetSet(t *testing.T) {
 			is.Equal(output, tt.Value)
 		case *TestStruct:
 			var output *TestStruct
-			err := sl.Get(tt.Key, &output)
-			is.NoErr(err)
-			is.Equal(output, tt.Value)
-		default:
-			var output interface{}
 			err := sl.Get(tt.Key, &output)
 			is.NoErr(err)
 			is.Equal(output, tt.Value)
