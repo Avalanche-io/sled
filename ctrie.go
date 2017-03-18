@@ -5,19 +5,19 @@ import (
 	"hash/fnv"
 )
 
-// HashFactory returns a new Hash64 used to hash keys.
-type HashFactory func() hash.Hash64
+// hasher returns a new Hash64 used to hash keys.
+type hasher func() hash.Hash64
 
-func defaultHashFactory() hash.Hash64 {
+func defaulthasher() hash.Hash64 {
 	return fnv.New64a()
 }
 
 // Ctrie is a concurrent, lock-free hash trie. By default, keys are hashed
-// using FNV-1a unless a HashFactory is provided to New.
+// using FNV-1a unless a hasher is provided to New.
 type ctrie struct {
 	root        *iNode
 	readOnly    bool
-	hashFactory HashFactory
+	hashFactory hasher
 }
 
 // generation demarcates Ctrie snapshots. We use a heap-allocated reference
@@ -36,17 +36,17 @@ type entry struct {
 	hash  uint64
 }
 
-// New creates an empty Ctrie which uses the provided HashFactory for key
+// New creates an empty Ctrie which uses the provided hasher for key
 // hashing. If nil is passed in, it will default to FNV-1a hashing.
-func newCtrie(hashFactory HashFactory) *ctrie {
+func newCtrie(hashFactory hasher) *ctrie {
 	if hashFactory == nil {
-		hashFactory = defaultHashFactory
+		hashFactory = defaulthasher
 	}
 	root := &iNode{main: &node{cNode: &cNode{}}}
 	return makectrie(root, hashFactory, false)
 }
 
-func makectrie(root *iNode, hashFactory HashFactory, readOnly bool) *ctrie {
+func makectrie(root *iNode, hashFactory hasher, readOnly bool) *ctrie {
 	return &ctrie{
 		root:        root,
 		hashFactory: hashFactory,

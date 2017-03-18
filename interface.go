@@ -1,6 +1,6 @@
 package sled
 
-// KV is a generalized interface to any key/value store
+// Sled is an interface for sled key value store types.
 type Sled interface {
 	Set(key string, v interface{}) error
 	SetIfNil(string, interface{}) bool
