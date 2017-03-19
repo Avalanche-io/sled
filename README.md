@@ -44,11 +44,11 @@ fmt.Printf("key (wrong type): %v, err: %s\n", wrong_value_type, err)
 err = sl.Get("key", &right_value_type)
 ```
 
-Conditional setting of a key.  SetIfNil will only assign the value if the key is not already set.
+Setting a key conditionally.  SetIfNil will only assign the value if the key is not already set.
 
 `SetIfNil(string, interface{}) bool`
 
-Dealt a key.
+Deleting a key.
 
 `Delete(string) (interface{}, bool)`
 
@@ -66,7 +66,7 @@ for elm := range sl.Iterate(stop) {
 }
 ```
 
-A Snapshot is a nearly zero cost copy of a sled that will not be effected by future changes to the source sled. It can be made mutable or immutable by setting the argument to either `sled.ReadWrite`, or `sled.ReadOnly`.
+A Snapshot is a nearly zero cost copy of a sled that will not be effected by future changes to the source sled. It can be made mutable or immutable by setting the argument to `sled.ReadWrite`, or `sled.ReadOnly`.
 
 ```go
 sl_mutable := sl.Snapshot(sled.ReadWrite)
