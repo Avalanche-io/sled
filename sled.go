@@ -36,6 +36,10 @@ func (e *ele) Value() interface{} {
 	return e.v
 }
 
+func (s *sled) Size() uint {
+	return s.ct.Size()
+}
+
 // Assigns value to key, replacing any previous values.
 func (s *sled) Set(key string, value interface{}) error {
 	s.ct.Insert([]byte(key), value)

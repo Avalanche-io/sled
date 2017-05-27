@@ -9,4 +9,5 @@ type Sled interface {
 	Close() error
 	Iterate(<-chan struct{}) <-chan Element
 	Snapshot(IoMode) Sled
+	Size() uint
 }
