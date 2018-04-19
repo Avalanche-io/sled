@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// Create a new Sled object with optional custom configuration.
+// Create a new Sled object.
 func New() Sled {
 	ct := newCtrie(nil)
 	return &sled{ct}
